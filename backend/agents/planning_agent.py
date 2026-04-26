@@ -92,7 +92,7 @@ class PlanningAgent:
                 break
             except (ValueError, json.JSONDecodeError) as e:
                 logger.warning("Planning attempt %d failed: %s", attempt, e)
-                if attempt == self.max_retries + 1:
+                if attempt >= self.max_retries:
                     raise
                 messages.append({"role": "assistant", "content": response.content})
                 messages.append(

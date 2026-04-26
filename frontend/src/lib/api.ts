@@ -1,8 +1,11 @@
 import type {
   CheckInRequest,
   CheckInResponse,
+  GoalProgress,
+  KpiMetrics,
   OverridePrompt,
   ReadinessReport,
+  SchedulerStatus,
   TrainingPlan,
   TrainingSession,
   UserProfile,
@@ -35,18 +38,6 @@ export interface PipelineRunResult {
   session_count: number | null
   total_tokens_used: number | null
   error: string | null
-}
-
-export interface KpiMetrics {
-  dates: string[]
-  readiness_scores: (number | null)[]
-  hrv_ms: (number | null)[]
-  sleep_scores: (number | null)[]
-  body_battery_max: (number | null)[]
-  acwr: (number | null)[]
-  resting_hr: (number | null)[]
-  total_steps: (number | null)[]
-  active_calories: (number | null)[]
 }
 
 // ── User ID helpers ───────────────────────────────────────────────────────
@@ -162,4 +153,36 @@ export async function updateProfile(userId: string, data: Partial<UserProfile>):
 
 export async function getKpiMetrics(userId: string, days = 14): Promise<KpiMetrics> {
   return apiFetch(`/metrics/kpi/${userId}?days=${days}`)
+}
+
+export async function getGoalProgress(userId: string): Promise<GoalProgress> {
+  return apiFetch(`/metrics/goal/${userId}`)
+}
+
+// ── Scheduler ─────────────────────────────────────────────────────────────
+
+export async function getSchedulerStatus(): Promise<SchedulerStatus> {
+  return apiFetch('/scheduler/status')
+}
+
+export async function triggerSync(userId: string): Promise<{ triggered: boolean; message: string }> {
+  return apiFetch('/scheduler/trigger/sync', {
+    method: 'POST',
+    body: JSON.stringify({ user_id: userId }),
+  })
+}
+
+export async function triggerPipeline(userId: string): Promise<{ triggered: boolean }> {
+  return apiFetch('/scheduler/trigger/pipeline', {
+    method: 'POST',
+    body: JSON.stringify({ user_id: userId }),
+  })
+}
+
+export async function clearCurrentPlan(userId: string): Promise<{ cleared: boolean; plans_affected: number; message: string }> {
+  return apiFetch(`/plans/current/${userId}`, { method: 'DELETE' })
+}
+
+export async function resetAllData(userId: string): Promise<{ reset: boolean; deleted: Record<string, number>; message: string; next_steps: string[] }> {
+  return apiFetch(`/data/${userId}`, { method: 'DELETE' })
 }

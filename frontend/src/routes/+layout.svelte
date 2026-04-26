@@ -10,6 +10,9 @@
     isLoading,
     pipelineRunning,
     overridePrompt,
+    toasts,
+    addToast,
+    dismissToast,
   } from "$lib/stores";
   import {
     getCurrentPlan,
@@ -24,21 +27,31 @@
   let { children } = $props();
   const devId = import.meta.env.VITE_DEV_USER_ID;
   if (devId) storeUserId(devId);
+
   // ── Route → page title map ──────────────────────────────────────────
   const ROUTE_TITLES: Record<string, string> = {
     "/": "Dashboard",
     "/checkin": "Daily Check-in",
-    "/stats": "Statistics",
+    "/stats": "Performance",
     "/settings": "Settings",
   };
   let pageTitle = $derived(ROUTE_TITLES[$page.url.pathname] ?? "FitCoach AI");
 
-  // ── Error auto-dismiss ──────────────────────────────────────────────
+  // ── Active route detection ──────────────────────────────────────────
+  function isActive(path: string): boolean {
+    if (path === "/") return $page.url.pathname === "/";
+    return (
+      $page.url.pathname === path || $page.url.pathname.startsWith(path + "/")
+    );
+  }
+
+  // ── Error auto-dismiss (keep for backward compat) ───────────────────
   let errorTimer: ReturnType<typeof setTimeout>;
   $effect(() => {
     if ($globalError) {
+      addToast($globalError, "error");
       clearTimeout(errorTimer);
-      errorTimer = setTimeout(() => globalError.set(null), 5000);
+      errorTimer = setTimeout(() => globalError.set(null), 100);
     }
   });
 
@@ -55,11 +68,36 @@
       : "bg-slate-400",
   );
 
+  // ── Data freshness ──────────────────────────────────────────────────
+  function timeAgo(dateStr: string | undefined): {
+    label: string;
+    cls: string;
+  } {
+    if (!dateStr) return { label: "Never", cls: "text-slate-500" };
+    const today = new Date();
+    today.setHours(0, 0, 0, 0);
+    const d = new Date(dateStr + "T00:00:00");
+    const days = Math.round((today.getTime() - d.getTime()) / 86400000);
+    if (days === 0) return { label: "Today", cls: "text-green-400" };
+    if (days === 1) return { label: "Yesterday", cls: "text-amber-400" };
+    return {
+      label: `${days} days ago`,
+      cls: days > 2 ? "text-red-400" : "text-amber-400",
+    };
+  }
+  let freshness = $derived(timeAgo($todayReport?.report_date));
+
   // ── Nav links ───────────────────────────────────────────────────────
-  const NAV = [
+  const NAV_DESKTOP = [
     { href: "/", label: "Dashboard", icon: "🏠" },
     { href: "/checkin", label: "Check-in", icon: "✅" },
-    // { href: "/stats", label: "Stats", icon: "📊" },
+    { href: "/stats", label: "Performance", icon: "📊" },
+    { href: "/settings", label: "Settings", icon: "⚙️" },
+  ];
+  const NAV_MOBILE = [
+    { href: "/", label: "Dashboard", icon: "🏠" },
+    { href: "/checkin", label: "Check-in", icon: "✅" },
+    { href: "/stats", label: "Stats", icon: "📊" },
     { href: "/settings", label: "Settings", icon: "⚙️" },
   ];
 
@@ -67,11 +105,10 @@
   async function handleRunPipeline() {
     if (!$userId || $pipelineRunning) return;
     pipelineRunning.set(true);
-    globalError.set(null);
     try {
       const result = await runFullPipeline($userId);
       if (!result.success) {
-        globalError.set(result.error ?? "Pipeline failed");
+        addToast(result.error ?? "Pipeline failed", "error");
         return;
       }
       const [planRes, reportRes] = await Promise.allSettled([
@@ -80,10 +117,20 @@
       ]);
       if (planRes.status === "fulfilled") currentPlan.set(planRes.value);
       if (reportRes.status === "fulfilled") todayReport.set(reportRes.value);
+      addToast("Pipeline complete — plan updated", "success");
     } catch (e: unknown) {
-      globalError.set(e instanceof Error ? e.message : "Pipeline failed");
+      addToast(e instanceof Error ? e.message : "Pipeline failed", "error");
     } finally {
       pipelineRunning.set(false);
+    }
+  }
+
+  // ── Keyboard shortcut ───────────────────────────────────────────────
+  function handleKeydown(e: KeyboardEvent) {
+    const target = e.target as HTMLElement;
+    const inInput = ["INPUT", "TEXTAREA", "SELECT"].includes(target.tagName);
+    if (!inInput && e.key === "r" && !e.metaKey && !e.ctrlKey) {
+      handleRunPipeline();
     }
   }
 
@@ -112,7 +159,21 @@
       isLoading.set(false);
     }
   });
+
+  // ── Toast icon helper ───────────────────────────────────────────────
+  function toastIcon(type: string): string {
+    if (type === "success") return "✓";
+    if (type === "error") return "✕";
+    return "ℹ";
+  }
+  function toastBg(type: string): string {
+    if (type === "success") return "bg-green-600";
+    if (type === "error") return "bg-red-600";
+    return "bg-slate-700";
+  }
 </script>
+
+<svelte:window onkeydown={handleKeydown} />
 
 <svelte:head>
   <title>{pageTitle} — FitCoach AI</title>
@@ -127,19 +188,31 @@
   </div>
 {/if}
 
-<!-- ── Global error toast ─────────────────────────────────────────────── -->
-{#if $globalError}
+<!-- ── Toast stack ────────────────────────────────────────────────────── -->
+{#if $toasts.length > 0}
   <div
-    class="fixed z-50 top-4 right-4 lg:top-auto lg:bottom-6 lg:right-6
-              max-w-sm bg-red-600 text-white rounded-xl shadow-lg px-4 py-3
-              flex items-start gap-3 text-sm"
+    class="fixed z-50 flex flex-col gap-2
+              top-4 left-1/2 -translate-x-1/2 w-[calc(100vw-2rem)] max-w-sm
+              md:left-auto md:translate-x-0 md:right-6 md:top-auto md:bottom-6"
   >
-    <span class="flex-1">{$globalError}</span>
-    <button
-      onclick={() => globalError.set(null)}
-      class="text-white/80 hover:text-white transition text-base leading-none mt-0.5"
-      aria-label="Dismiss">✕</button
-    >
+    {#each $toasts as toast (toast.id)}
+      <div
+        class="flex items-start gap-2.5 px-4 py-3 rounded-xl shadow-lg text-sm font-medium text-white
+                  {toastBg(toast.type)} animate-slide-up"
+      >
+        <span
+          class="w-5 h-5 rounded-full bg-white/20 flex items-center justify-center text-xs shrink-0 mt-0.5"
+        >
+          {toastIcon(toast.type)}
+        </span>
+        <span class="flex-1 leading-snug">{toast.message}</span>
+        <button
+          onclick={() => dismissToast(toast.id)}
+          class="text-white/60 hover:text-white text-base leading-none shrink-0"
+          aria-label="Dismiss">✕</button
+        >
+      </div>
+    {/each}
   </div>
 {/if}
 
@@ -160,15 +233,15 @@
 
     <!-- Nav links -->
     <nav class="flex-1 px-3 py-4 space-y-1">
-      {#each NAV as link}
-        {@const active = $page.url.pathname === link.href}
+      {#each NAV_DESKTOP as link}
+        {@const active = isActive(link.href)}
         <a
           href={link.href}
           class="flex items-center gap-3 px-3 py-2.5 rounded-lg text-sm font-medium
                  transition-all duration-150
                  {active
-            ? 'bg-blue-600/20 text-white border-l-2 border-blue-400 pl-[10px]'
-            : 'text-slate-400 hover:text-white hover:bg-white/5 border-l-2 border-transparent pl-[10px]'}"
+            ? 'bg-blue-600/10 text-blue-400 border-l-4 border-blue-500 pl-[8px]'
+            : 'text-slate-400 hover:text-white hover:bg-white/5 border-l-4 border-transparent pl-[8px]'}"
         >
           <span class="text-base w-5 text-center">{link.icon}</span>
           {link.label}
@@ -176,8 +249,8 @@
       {/each}
     </nav>
 
-    <!-- Readiness pill -->
-    <div class="px-5 py-4 border-t border-white/10">
+    <!-- Readiness pill + data freshness -->
+    <div class="px-5 py-4 border-t border-white/10 space-y-2">
       {#if $todayReport}
         <div class="flex items-center gap-3">
           <div class="w-2.5 h-2.5 rounded-full flex-shrink-0 {gateBg}"></div>
@@ -193,9 +266,15 @@
             </p>
           </div>
         </div>
+        <p class="text-xs {freshness.cls}">Last updated: {freshness.label}</p>
       {:else}
         <p class="text-xs text-slate-500">No readiness data yet</p>
       {/if}
+    </div>
+
+    <!-- Keyboard shortcut hint -->
+    <div class="px-5 pb-4">
+      <p class="text-xs text-slate-600 font-mono">R — Run Pipeline</p>
     </div>
   </aside>
 
@@ -236,15 +315,15 @@
               bg-slate-900 border-t border-slate-700/60 shadow-lg
               flex items-stretch"
   >
-    {#each NAV as tab}
-      {@const active = $page.url.pathname === tab.href}
+    {#each NAV_MOBILE as tab}
+      {@const active = isActive(tab.href)}
       <a
         href={tab.href}
         class="flex-1 flex flex-col items-center justify-center py-2 gap-0.5 text-xs font-medium
                transition-colors
                {active
           ? 'text-blue-500'
-          : 'text-slate-400 hover:text-slate-600'}"
+          : 'text-slate-400 hover:text-slate-200'}"
       >
         <span class="text-lg leading-tight">{tab.icon}</span>
         <span class="leading-tight">{tab.label}</span>
@@ -252,3 +331,19 @@
     {/each}
   </nav>
 </div>
+
+<style>
+  @keyframes slide-up {
+    from {
+      opacity: 0;
+      transform: translateY(8px);
+    }
+    to {
+      opacity: 1;
+      transform: translateY(0);
+    }
+  }
+  .animate-slide-up {
+    animation: slide-up 0.2s ease-out both;
+  }
+</style>

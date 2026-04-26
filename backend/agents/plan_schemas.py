@@ -54,6 +54,15 @@ class StrengthExercise(BaseModel):
     notes: str | None = None
 
 
+class SwimSet(BaseModel):
+    stroke: str
+    distance_m: int
+    reps: int
+    rest_sec: int | None = None
+    intensity: str | None = None
+    notes: str | None = None
+
+
 # Map common LLM sport names to our enum values
 _SPORT_ALIASES: dict[str, str] = {
     "cycling": "bike",
@@ -81,6 +90,7 @@ class TrainingSession(BaseModel):
     description: str
     key_focus: str
     exercises: list[StrengthExercise] = []
+    swim_sets: list[SwimSet] = []
     nutrition: NutritionGuidance = NutritionGuidance()
     override_applied: str | None = None
     readiness_adjusted: bool = False
@@ -129,12 +139,12 @@ class TrainingPlan(BaseModel):
     goal_date: str | None = None
     weeks_to_goal: int | None = None
     sessions: list[TrainingSession]
-    weekly_targets: list[WeeklyTargets]
+    weekly_targets: list[WeeklyTargets] = []
     readiness_report_id: str | None = None
     readiness_score_at_generation: int | None = None
     training_gate_at_generation: str | None = None
     override_applied: str | None = None
-    plan_rationale: str
+    plan_rationale: str = ""
     nutrition_weekly_notes: str | None = None
 
     @field_validator("weekly_targets", mode="before")
@@ -144,12 +154,35 @@ class TrainingPlan(BaseModel):
             return [v]
         return v
 
-    @field_validator("sessions")
-    @classmethod
-    def exactly_7_sessions(cls, v: list[TrainingSession]) -> list[TrainingSession]:
-        if len(v) != 7:
-            raise ValueError(f"sessions must contain exactly 7 entries, got {len(v)}")
-        return v
+    @model_validator(mode="after")
+    def auto_fill_sessions(self) -> TrainingPlan:
+        """Pad missing days in the 7-day window with REST sessions instead of hard-failing."""
+        if len(self.sessions) == 7:
+            return self
+        existing_dates = {s.date for s in self.sessions}
+        start = date_cls.fromisoformat(self.valid_from)
+        filled = list(self.sessions)
+        for i in range(7):
+            d = (start + timedelta(days=i)).isoformat()
+            if d not in existing_dates:
+                day_name = (start + timedelta(days=i)).strftime("%A")
+                filled.append(
+                    TrainingSession(
+                        date=d,
+                        day_of_week=day_name,
+                        sport=SportType.REST,
+                        title="Rest Day",
+                        description="Recovery — no structured training.",
+                        key_focus="Rest and recovery",
+                    )
+                )
+        filled.sort(key=lambda s: s.date)
+        if len(filled) != 7:
+            raise ValueError(
+                f"sessions must contain exactly 7 entries, got {len(self.sessions)}"
+            )
+        self.sessions = filled
+        return self
 
     @model_validator(mode="after")
     def valid_to_matches(self) -> TrainingPlan:

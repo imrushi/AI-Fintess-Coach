@@ -22,6 +22,33 @@ export const globalError = writable<string | null>(null)
 
 export const showOverrideModal = writable<boolean>(false)
 
+// ── Toast system ──────────────────────────────────────────────────────────
+
+export interface Toast {
+  id: string
+  message: string
+  type: 'success' | 'error' | 'info'
+  duration: number
+}
+
+export const toasts = writable<Toast[]>([])
+
+export function addToast(
+  message: string,
+  type: Toast['type'] = 'info',
+  duration = 4000,
+): void {
+  const id = `${Date.now()}-${Math.random().toString(36).slice(2)}`
+  toasts.update(t => [...t, { id, message, type, duration }])
+  if (duration > 0) {
+    setTimeout(() => dismissToast(id), duration)
+  }
+}
+
+export function dismissToast(id: string): void {
+  toasts.update(t => t.filter(toast => toast.id !== id))
+}
+
 // ── Derived stores ────────────────────────────────────────────────────────
 
 export const todaySession = derived(currentPlan, ($plan) => {

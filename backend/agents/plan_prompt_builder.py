@@ -51,6 +51,15 @@ SWIMMING SKILLS:
 - For learning strokes (e.g. butterfly): include dedicated drill progressions (body-dolphin kick, one-arm fly) not full-stroke laps
 - Backstroke weakness: include backstroke drills (catch-up back, single-arm back) as warm-up or cool-down periodically
 
+SWIM SET STRUCTURE:
+- For swim sessions, include a detailed set breakdown under the "swim_sets" key
+- Format: [{"stroke": str, "distance_m": int, "reps": int, "rest_sec": int|null, "intensity": str|null, "notes": str|null}]
+- Structure as warm-up sets → main set(s) → cool-down; label each group in notes
+- Allowed stroke values: freestyle, backstroke, breaststroke, butterfly, drill, kick, choice
+- rest_sec is rest between reps within the set (e.g. 30 = 30s rest between each rep)
+- Include technique cues in notes (e.g. "bilateral breathing every 3", "high elbow catch")
+- For non-swim sessions, omit swim_sets or set to []
+
 MEDICAL/DIETARY:
 - Always respect medical conditions when prescribing sessions
 - Asthma: avoid high Z5 intervals; prefer Z2-Z3 sustained efforts
@@ -218,6 +227,7 @@ def build_planning_prompt(
         "Each session must have: date, day_of_week, sport, duration_min, "
         "intensity_zone, title, description, key_focus, nutrition.\n"
         "For strength sessions also include: exercises (list of {exercise, sets, reps_or_duration, notes}).\n"
+        "For swim sessions also include: swim_sets (list of {stroke, distance_m, reps, rest_sec, intensity, notes}).\n"
         "ALLOWED sport values (use EXACTLY): swim, bike, run, brick, strength, yoga, active_recovery, rest.\n"
         "nutrition must be an object with keys: pre_session, during_session, post_session.\n"
         "weekly_targets must include: week_number, week_start, total_volume_min, intensity_distribution.\n"

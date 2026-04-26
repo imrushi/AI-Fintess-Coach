@@ -5,7 +5,7 @@
     todayReport,
     currentPlan,
     todaySession,
-    globalError,
+    addToast,
   } from "$lib/stores";
   import { submitCheckIn, getTodayCheckIn, getCurrentPlan } from "$lib/api";
   import type { CheckInRequest } from "$lib/types";
@@ -114,7 +114,6 @@
     const uid = $userId;
     if (!uid || !canSubmit) return;
     loading = true;
-    globalError.set(null);
     planUpdated = false;
     try {
       const req: CheckInRequest = {
@@ -141,8 +140,9 @@
         }
       }
     } catch (e: unknown) {
-      globalError.set(
+      addToast(
         e instanceof Error ? e.message : "Failed to save check-in",
+        "error",
       );
     } finally {
       loading = false;

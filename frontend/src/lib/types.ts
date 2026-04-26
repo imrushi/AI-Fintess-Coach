@@ -61,6 +61,15 @@ export interface StrengthExercise {
   notes: string | null
 }
 
+export interface SwimSet {
+  stroke: string
+  distance_m: number
+  reps: number
+  rest_sec: number | null
+  intensity: string | null
+  notes: string | null
+}
+
 export interface TrainingSession {
   date: string
   day_of_week: string
@@ -73,6 +82,7 @@ export interface TrainingSession {
   description: string
   key_focus: string
   exercises: StrengthExercise[]
+  swim_sets: SwimSet[]
   nutrition: NutritionGuidance
   override_applied: string | null
   readiness_adjusted: boolean
@@ -140,7 +150,9 @@ export interface UserProfile {
   fitness_level: string | null
   medical_conditions: string[]
   dietary_preference: string | null
+  dietary_allergies: string | null
   max_weekly_hours: number | null
+  garmin_email: string | null
   swim_equipment: string | null
   swim_strokes: string | null
   model_analysis: string
@@ -193,4 +205,117 @@ export function formatDistance(m: number | null): string {
 
 export function todayStr(): string {
   return new Date().toISOString().split('T')[0]
+}
+
+// ── Stats / metrics types ─────────────────────────────────────────────────
+
+export type Trend = 'improving' | 'declining' | 'stable' | 'insufficient_data'
+
+export interface KpiSummary {
+  avg_readiness_7d: number | null
+  avg_hrv_7d: number | null
+  avg_sleep_score_7d: number | null
+  avg_acwr_7d: number | null
+  total_training_min_7d: number
+  total_training_min_14d: number
+  trend_readiness: Trend
+  trend_hrv: Trend
+  trend_sleep: Trend
+  best_readiness_14d: number | null
+  worst_readiness_14d: number | null
+  days_with_data: number
+  data_completeness_pct: number
+}
+
+export interface WorkoutEntry {
+  date: string
+  sport: SportType
+  duration_min: number | null
+  distance_m: number | null
+  avg_hr: number | null
+}
+
+export interface WeeklyVolume {
+  week_start: string
+  total_min: number
+  by_sport: Record<string, number>
+}
+
+export interface KpiMetrics {
+  dates: string[]
+  readiness_scores: (number | null)[]
+  hrv_ms: (number | null)[]
+  sleep_scores: (number | null)[]
+  body_battery_max: (number | null)[]
+  acwr: (number | null)[]
+  resting_hr: (number | null)[]
+  total_steps: (number | null)[]
+  active_calories: (number | null)[]
+  summary: KpiSummary
+  workouts_14d: WorkoutEntry[]
+  weekly_volume: WeeklyVolume[]
+}
+
+export interface GoalProgress {
+  goal_event: string | null
+  goal_date: string | null
+  weeks_to_goal: number | null
+  days_to_goal: number | null
+  phase: string
+  phase_description: string
+  completion_pct: number
+  weekly_volume_target_min: number
+  recent_consistency: number
+  readiness_trend: string
+  on_track: boolean
+  coaching_note: string
+}
+
+export interface SchedulerStatus {
+  is_running: boolean
+  jobs: Array<{
+    id: string
+    next_run: string | null
+    trigger: string
+  }>
+}
+
+// ── Stats helper functions ────────────────────────────────────────────────
+
+export function trendIcon(trend: string): string {
+  if (trend === 'improving') return '↑'
+  if (trend === 'declining') return '↓'
+  if (trend === 'stable') return '→'
+  return '—'
+}
+
+export function trendColor(trend: string): string {
+  if (trend === 'improving') return 'text-green-400'
+  if (trend === 'declining') return 'text-red-400'
+  return 'text-slate-400'
+}
+
+export function phaseColor(phase: string): string {
+  const map: Record<string, string> = {
+    base:      'bg-blue-900/40 text-blue-300',
+    build:     'bg-yellow-900/40 text-yellow-300',
+    peak:      'bg-orange-900/40 text-orange-300',
+    taper:     'bg-purple-900/40 text-purple-300',
+    race_week: 'bg-red-900/40 text-red-300',
+    complete:  'bg-green-900/40 text-green-300',
+  }
+  return map[phase] ?? 'bg-slate-700 text-slate-300'
+}
+
+export function formatWeekStart(dateStr: string): string {
+  const d = new Date(dateStr + 'T00:00:00')
+  return d.toLocaleDateString('en-US', { month: 'short', day: 'numeric' })
+}
+
+export function acwrRiskColor(acwr: number | null): string {
+  if (acwr === null) return 'text-slate-400'
+  if (acwr < 0.8)  return 'text-blue-400'    // undertraining
+  if (acwr <= 1.3) return 'text-green-400'   // optimal
+  if (acwr <= 1.5) return 'text-orange-400'  // caution
+  return 'text-red-400'                      // danger
 }
