@@ -111,7 +111,7 @@ def build_analysis_prompt(
     ]
 
     # ── Section 2 — 14-day metrics table ─────────────────────────────
-    header = "date | steps | rhr | hrv_ms | bb_min | bb_max | slp_score | slp_min | deep_min | stress"
+    header = "date | steps | rhr | hrv_ms | bb_min | bb_max | slp_score | slp_min | deep_min | stress | vo2max | acute_load | chronic_load | acwr"
     rows: list[str] = []
     for m in reversed(metrics):  # newest first
         rows.append(
@@ -127,6 +127,10 @@ def build_analysis_prompt(
                     _v(m.get("sleep_duration_min")),
                     _v(m.get("deep_sleep_min")),
                     _v(m.get("stress_avg")),
+                    _v(m.get("vo2max")),
+                    _v(m.get("acute_load")),
+                    _v(m.get("chronic_load")),
+                    _v(m.get("acwr")),
                 ]
             )
         )
@@ -139,11 +143,19 @@ def build_analysis_prompt(
     sections.append(f"## HRV Baseline (28d avg): {baseline_str} ms")
 
     # ── Section 4 — Training load ───────────────────────────────────
+    # Use stored Garmin training load values from the most recent day if available
+    latest = metrics[-1] if metrics else {}
+    stored_acute = latest.get("acute_load")
+    stored_chronic = latest.get("chronic_load")
+    stored_acwr = latest.get("acwr")
     sections.append(
         f"## Training Load\n"
-        f"Acute (7d avg kcal): {_v(acute)}\n"
-        f"Chronic (28d avg kcal): {_v(chronic)}\n"
-        f"ACWR: {_v(acwr)}"
+        f"Acute load (Garmin, latest): {_v(stored_acute)}\n"
+        f"Chronic load (Garmin, latest): {_v(stored_chronic)}\n"
+        f"ACWR (Garmin, latest): {_v(stored_acwr)}\n"
+        f"Acute (7d avg kcal, computed): {_v(acute)}\n"
+        f"Chronic (28d avg kcal, computed): {_v(chronic)}\n"
+        f"ACWR (computed): {_v(acwr)}"
     )
 
     # ── Section 5 — Recent workouts ─────────────────────────────────
