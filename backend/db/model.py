@@ -73,6 +73,8 @@ class UserProfile(Base):
     garmin_password: Mapped[str | None] = mapped_column(String, nullable=True)
     swim_equipment: Mapped[str | None] = mapped_column(String, nullable=True)  # e.g. "pull_buoy,paddles"
     swim_strokes: Mapped[str | None] = mapped_column(String, nullable=True)    # e.g. "freestyle:expert,breaststroke:expert,backstroke:beginner,butterfly:learning"
+    date_of_birth: Mapped[date | None] = mapped_column(Date, nullable=True)
+    lthr: Mapped[int | None] = mapped_column(Integer, nullable=True)           # Lactate Threshold HR in bpm
     model_analysis: Mapped[str] = mapped_column(
         String, default="openrouter/anthropic/claude-sonnet-4.6"
     )

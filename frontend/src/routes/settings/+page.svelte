@@ -67,6 +67,8 @@
     dietary_preference: "",
     dietary_allergies: "",
     max_weekly_hours: "",
+    date_of_birth: "",
+    lthr: "",
     garmin_email: "",
     garmin_password: "",
     swim_equipment: "",
@@ -141,6 +143,8 @@
         dietary_allergies: p.dietary_allergies ?? "",
         max_weekly_hours:
           p.max_weekly_hours != null ? String(p.max_weekly_hours) : "",
+        date_of_birth: p.date_of_birth ?? "",
+        lthr: p.lthr != null ? String(p.lthr) : "",
         garmin_email: p.garmin_email ?? "",
         garmin_password: "",
         swim_equipment: p.swim_equipment ?? "",
@@ -187,6 +191,8 @@
           : {}),
         swim_equipment: form.swim_equipment || null,
         swim_strokes: form.swim_strokes || null,
+        date_of_birth: form.date_of_birth || null,
+        lthr: form.lthr ? parseInt(form.lthr) : null,
         model_analysis: form.model_analysis,
         model_planning: form.model_planning,
       });
@@ -466,6 +472,41 @@
               />
               <p class="text-xs text-slate-500">
                 Total hours available per week
+              </p>
+            </div>
+
+            <!-- Date of Birth -->
+            <div class="space-y-1">
+              <label for="date-of-birth" class="label-sm">Date of Birth</label>
+              <input
+                id="date-of-birth"
+                type="date"
+                bind:value={form.date_of_birth}
+                max={TODAY}
+                class="input-field"
+              />
+              <p class="text-xs text-slate-500">
+                Used to calculate age-based max HR
+              </p>
+            </div>
+
+            <!-- LTHR -->
+            <div class="space-y-1">
+              <label for="lthr" class="label-sm"
+                >Lactate Threshold HR (bpm)</label
+              >
+              <input
+                id="lthr"
+                type="number"
+                bind:value={form.lthr}
+                min="100"
+                max="220"
+                step="1"
+                placeholder="e.g. 165"
+                class="input-field"
+              />
+              <p class="text-xs text-slate-500">
+                Overrides age formula. Run a 20-min all-out TT and use avg HR.
               </p>
             </div>
           </div>

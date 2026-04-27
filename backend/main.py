@@ -81,6 +81,8 @@ def _profile_to_dict(p: UserProfile) -> dict:
         "garmin_email": p.garmin_email,
         "swim_equipment": p.swim_equipment,
         "swim_strokes": p.swim_strokes,
+        "date_of_birth": str(p.date_of_birth) if p.date_of_birth else None,
+        "lthr": p.lthr,
         "model_analysis": p.model_analysis,
         "model_planning": p.model_planning,
         "updated_at": p.updated_at.isoformat() if p.updated_at else None,
@@ -103,6 +105,8 @@ class UpdateProfileRequest(BaseModel):
     garmin_password: str | None = None
     swim_equipment: str | None = None  # e.g. "pull_buoy,paddles"
     swim_strokes: str | None = None    # e.g. "freestyle:expert,breaststroke:expert,backstroke:beginner,butterfly:learning"
+    date_of_birth: date | None = None
+    lthr: int | None = None            # Lactate Threshold HR in bpm
 
     @field_validator("goal_date")
     @classmethod

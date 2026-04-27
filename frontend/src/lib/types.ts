@@ -155,6 +155,8 @@ export interface UserProfile {
   garmin_email: string | null
   swim_equipment: string | null
   swim_strokes: string | null
+  date_of_birth: string | null
+  lthr: number | null
   model_analysis: string
   model_planning: string
 }

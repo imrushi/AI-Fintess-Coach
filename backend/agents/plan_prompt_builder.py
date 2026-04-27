@@ -10,7 +10,7 @@ from datetime import date, timedelta
 from agents.caveman import compress
 from agents.schemas import ReadinessReport
 from db.model import TrainingPlanRow, get_session
-from db.reader import get_recent_workouts, get_user_profile, get_weeks_to_goal
+from db.reader import compute_hr_zones, get_recent_workouts, get_user_profile, get_weeks_to_goal
 
 from sqlalchemy import select
 
@@ -125,6 +125,7 @@ def build_planning_prompt(
     profile = get_user_profile(user_id) or {}
     recent_workouts = get_recent_workouts(user_id, days=14)
     weeks_to_goal = get_weeks_to_goal(user_id)
+    hr_zones = compute_hr_zones(user_id)
     today = date.today()
     plan_start = today
     plan_end = today + timedelta(days=6)
@@ -169,6 +170,24 @@ def build_planning_prompt(
         f"ACWR: {acwr}\n"
         f"HRV deviation: {hrv_dev}%"
     )
+
+    # Section 2b — HR Zones
+    if hr_zones:
+        zone_lines = "\n".join(
+            f"{z}: {bpm}" for z, bpm in hr_zones["zones"].items()
+        )
+        sections.append(
+            f"## HR Zones\n"
+            f"Method: {hr_zones['method']}\n"
+            f"{zone_lines}\n"
+            f"Use these exact BPM ranges when prescribing intensity zones in sessions."
+        )
+    else:
+        sections.append(
+            "## HR Zones\n"
+            "Not available (no LTHR, no recorded max HR, no date of birth set).\n"
+            "Use RPE and zone labels only."
+        )
 
     # Section 3 — Override
     if override_choice == "push_through":

@@ -188,6 +188,71 @@ def get_weeks_to_goal(user_id: str) -> int | None:
         return math.ceil(delta.days / 7)
 
 
+def compute_hr_zones(user_id: str) -> dict | None:
+    """Compute HR zones using the best available method.
+
+    Priority:
+    1. LTHR (user-set) → Friel's endurance zones
+    2. Max HR from recorded workouts → percentage-based zones
+    3. Age-based max HR (220 − age) → percentage-based zones
+
+    Returns a dict with keys 'method' and 'zones' (Z1–Z5 BPM strings), or None.
+    """
+    with get_session() as s:
+        profile = s.get(UserProfile, user_id)
+        if profile is None:
+            return None
+
+        lthr = profile.lthr
+        dob = profile.date_of_birth
+
+        max_hr_recorded: int | None = s.execute(
+            select(func.max(Workout.max_hr)).where(
+                Workout.user_id == user_id,
+                Workout.max_hr.is_not(None),
+            )
+        ).scalar()
+
+    # ── Method 1: LTHR (Friel zones) ─────────────────────────────────
+    if lthr:
+        return {
+            "method": f"LTHR={lthr} bpm (user-set, Friel zones)",
+            "zones": {
+                "Z1": f"< {round(lthr * 0.85)} bpm (recovery)",
+                "Z2": f"{round(lthr * 0.85)}–{round(lthr * 0.89)} bpm (aerobic)",
+                "Z3": f"{round(lthr * 0.90)}–{round(lthr * 0.94)} bpm (tempo)",
+                "Z4": f"{round(lthr * 0.95)}–{round(lthr * 0.99)} bpm (threshold)",
+                "Z5": f"≥ {lthr} bpm (VO2max)",
+            },
+        }
+
+    # ── Method 2: Recorded max HR ─────────────────────────────────────
+    max_hr = max_hr_recorded
+    method_label: str | None = None
+    if max_hr is not None:
+        method_label = f"Recorded max HR={max_hr} bpm (from workouts)"
+
+    # ── Method 3: Age formula ─────────────────────────────────────────
+    if max_hr is None and dob is not None:
+        age = (date.today() - dob).days // 365
+        max_hr = 220 - age
+        method_label = f"Age-based max HR={max_hr} bpm (220−{age})"
+
+    if max_hr is None:
+        return None
+
+    return {
+        "method": method_label,
+        "zones": {
+            "Z1": f"{round(max_hr * 0.50)}–{round(max_hr * 0.60)} bpm (recovery)",
+            "Z2": f"{round(max_hr * 0.60)}–{round(max_hr * 0.70)} bpm (aerobic)",
+            "Z3": f"{round(max_hr * 0.70)}–{round(max_hr * 0.80)} bpm (tempo)",
+            "Z4": f"{round(max_hr * 0.80)}–{round(max_hr * 0.90)} bpm (threshold)",
+            "Z5": f"{round(max_hr * 0.90)}–{max_hr} bpm (VO2max)",
+        },
+    }
+
+
 def get_latest_readiness_report(user_id: str) -> dict | None:
     """Return the most recent readiness report as a dict, or None."""
     with get_session() as s:

@@ -135,7 +135,7 @@ class NightlyScheduler:
             client = GarminClient(garmin_email, garmin_password or "")
             client.connect()
 
-            for i in range(1, 30):
+            for i in range(1, 4):
                 sync_date = date.today() - timedelta(days=i)
                 date_str = sync_date.strftime("%Y-%m-%d")
                 raw = client.fetch_day(date_str)
