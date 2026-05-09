@@ -19,10 +19,10 @@ depends_on: Union[str, Sequence[str], None] = None
 
 
 def upgrade() -> None:
-    """Upgrade schema."""
-    op.add_column('training_plans', sa.Column('cleared_at', sa.DateTime(timezone=True), nullable=True))
+    with op.batch_alter_table('training_plans') as batch_op:
+        batch_op.add_column(sa.Column('cleared_at', sa.DateTime(timezone=True), nullable=True))
 
 
 def downgrade() -> None:
-    """Downgrade schema."""
-    op.drop_column('training_plans', 'cleared_at')
+    with op.batch_alter_table('training_plans') as batch_op:
+        batch_op.drop_column('cleared_at')

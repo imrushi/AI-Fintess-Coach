@@ -157,6 +157,9 @@ export interface UserProfile {
   swim_strokes: string | null
   date_of_birth: string | null
   lthr: number | null
+  current_swim_km_week: number | null
+  current_bike_km_week: number | null
+  current_run_km_week: number | null
   model_analysis: string
   model_planning: string
 }

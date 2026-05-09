@@ -81,14 +81,14 @@ _SPORT_ALIASES: dict[str, str] = {
 class TrainingSession(BaseModel):
     date: str
     day_of_week: str
-    sport: SportType
+    sport: SportType = SportType.REST
     status: SessionStatus = SessionStatus.PLANNED
     duration_min: int | None = None
     distance_m: float | None = None
     intensity_zone: IntensityZone | None = None
-    title: str
-    description: str
-    key_focus: str
+    title: str = "Rest Day"
+    description: str = "Recovery — no structured training."
+    key_focus: str = "Rest and recovery"
     exercises: list[StrengthExercise] = []
     swim_sets: list[SwimSet] = []
     nutrition: NutritionGuidance = NutritionGuidance()

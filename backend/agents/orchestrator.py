@@ -11,8 +11,10 @@ from uuid import uuid4
 from agents.analysis_agent import AnalysisAgent, AnalysisResult
 from agents.planning_agent import PlanningAgent, PlanningResult
 from agents.schemas import ReadinessReport
-from db.model import Job, get_session
+from db.model import Job, TrainingPlanRow, get_session
 from db.reader import get_user_profile
+
+from sqlalchemy import select
 
 logger = logging.getLogger(__name__)
 
@@ -154,12 +156,92 @@ class AgentOrchestrator:
         if not result.success:
             return result
 
-        planning = await self.run_planning(
-            user_id, result.analysis_result.report, override_choice
-        )
+        report = result.analysis_result.report
+
+        # Check for an existing current plan —
+        # if one exists, only patch tomorrow's session (token-efficient).
+        # If none exists, generate a fresh 7-day plan.
+        import json as _json
+        existing_plan_json: str | None = None
+        with get_session() as s:
+            existing_row = s.execute(
+                select(TrainingPlanRow).where(
+                    TrainingPlanRow.user_id == user_id,
+                    TrainingPlanRow.is_current == True,  # noqa: E712
+                )
+            ).scalar_one_or_none()
+            if existing_row is not None:
+                existing_plan_json = existing_row.plan_json
+
+        if existing_plan_json is not None:
+            logger.info(
+                "Existing plan found for %s — running daily patch (tomorrow only)", user_id
+            )
+            planning = await self.run_planning_patch(
+                user_id, report, existing_plan_json, override_choice
+            )
+        else:
+            logger.info("No existing plan for %s — generating full 7-day plan", user_id)
+            planning = await self.run_planning(user_id, report, override_choice)
+
         result.planning_result = planning.planning_result
 
         logger.info("Full pipeline complete for %s", user_id)
+        return result
+
+    async def run_planning_patch(
+        self,
+        user_id: str,
+        readiness_report: ReadinessReport,
+        current_plan_json: str,
+        override_choice: str | None = None,
+    ) -> PipelineResult:
+        run_date = str(date.today())
+        result = PipelineResult(user_id=user_id, run_date=run_date)
+        job_id = str(uuid4())
+
+        with get_session() as s:
+            s.add(Job(id=job_id, user_id=user_id, job_type="planning_patch", status="running"))
+
+        profile = get_user_profile(user_id)
+        if profile is None:
+            err = f"No profile found for user {user_id}"
+            with get_session() as s:
+                job = s.get(Job, job_id)
+                if job:
+                    job.status = "failed"
+                    job.error = err
+            result.error = err
+            return result
+
+        model_str = profile.get("model_planning", "openrouter/anthropic/claude-sonnet-4.6")
+
+        try:
+            agent = PlanningAgent(user_id=user_id, model_str=model_str)
+            planning = await agent.run_patch(readiness_report, current_plan_json, override_choice)
+            result.planning_result = planning
+            result.success = True
+
+            with get_session() as s:
+                job = s.get(Job, job_id)
+                if job:
+                    job.status = "done"
+                    mode = "patch_no_change" if planning.no_change else "patch"
+                    job.payload = json.dumps({"plan_id": planning.plan_db_id, "mode": mode})
+
+            if planning.no_change:
+                logger.info("Patch planning no-op for %s — session unchanged, no DB write.", user_id)
+            else:
+                logger.info("Patch planning complete for %s", user_id)
+        except Exception as e:
+            result.error = str(e)
+            with get_session() as s:
+                job = s.get(Job, job_id)
+                if job:
+                    job.status = "failed"
+                    job.error = str(e)
+            logger.exception("Patch planning failed for %s", user_id)
+
         return result
 
 

@@ -69,6 +69,9 @@
     max_weekly_hours: "",
     date_of_birth: "",
     lthr: "",
+    current_swim_km_week: "",
+    current_bike_km_week: "",
+    current_run_km_week: "",
     garmin_email: "",
     garmin_password: "",
     swim_equipment: "",
@@ -145,6 +148,12 @@
           p.max_weekly_hours != null ? String(p.max_weekly_hours) : "",
         date_of_birth: p.date_of_birth ?? "",
         lthr: p.lthr != null ? String(p.lthr) : "",
+        current_swim_km_week:
+          p.current_swim_km_week != null ? String(p.current_swim_km_week) : "",
+        current_bike_km_week:
+          p.current_bike_km_week != null ? String(p.current_bike_km_week) : "",
+        current_run_km_week:
+          p.current_run_km_week != null ? String(p.current_run_km_week) : "",
         garmin_email: p.garmin_email ?? "",
         garmin_password: "",
         swim_equipment: p.swim_equipment ?? "",
@@ -193,6 +202,15 @@
         swim_strokes: form.swim_strokes || null,
         date_of_birth: form.date_of_birth || null,
         lthr: form.lthr ? parseInt(form.lthr) : null,
+        current_swim_km_week: form.current_swim_km_week
+          ? parseFloat(form.current_swim_km_week)
+          : null,
+        current_bike_km_week: form.current_bike_km_week
+          ? parseFloat(form.current_bike_km_week)
+          : null,
+        current_run_km_week: form.current_run_km_week
+          ? parseFloat(form.current_run_km_week)
+          : null,
         model_analysis: form.model_analysis,
         model_planning: form.model_planning,
       });
@@ -509,6 +527,63 @@
                 Overrides age formula. Run a 20-min all-out TT and use avg HR.
               </p>
             </div>
+
+            <!-- Current Weekly Volume -->
+            <div class="col-span-2 space-y-2">
+              <p class="label-sm">Current Weekly Volume</p>
+              <p class="text-xs text-slate-500">
+                Your typical training load right now — used to calibrate the AI
+                plan. Leave blank or 0 if you don't do that sport (e.g. no
+                bike).
+              </p>
+              <div class="grid sm:grid-cols-3 gap-3">
+                <div class="space-y-1">
+                  <label for="swim-km" class="label-sm text-blue-400"
+                    >Swim (km/week)</label
+                  >
+                  <input
+                    id="swim-km"
+                    type="number"
+                    bind:value={form.current_swim_km_week}
+                    min="0"
+                    max="100"
+                    step="0.5"
+                    placeholder="0 = not available"
+                    class="input-field"
+                  />
+                </div>
+                <div class="space-y-1">
+                  <label for="bike-km" class="label-sm text-green-400"
+                    >Bike (km/week)</label
+                  >
+                  <input
+                    id="bike-km"
+                    type="number"
+                    bind:value={form.current_bike_km_week}
+                    min="0"
+                    max="2000"
+                    step="5"
+                    placeholder="0 = no bike"
+                    class="input-field"
+                  />
+                </div>
+                <div class="space-y-1">
+                  <label for="run-km" class="label-sm text-orange-400"
+                    >Run (km/week)</label
+                  >
+                  <input
+                    id="run-km"
+                    type="number"
+                    bind:value={form.current_run_km_week}
+                    min="0"
+                    max="500"
+                    step="1"
+                    placeholder="0 = not available"
+                    class="input-field"
+                  />
+                </div>
+              </div>
+            </div>
           </div>
 
           <!-- Fitness Level segmented control -->
@@ -690,17 +765,20 @@
             class="input-field"
           >
             <optgroup label="☁️ OpenRouter (Cloud)">
-              <option value="openrouter/anthropic/claude-3-5-sonnet-20241022"
-                >Claude 3.5 Sonnet (Best quality)</option
+              <option value="openrouter/anthropic/claude-sonnet-4.6"
+                >Claude 4.6 Sonnet (Best quality)</option
               >
               <option value="openrouter/anthropic/claude-3-haiku-20240307"
                 >Claude 3 Haiku (Fast + cheap)</option
               >
-              <option value="openrouter/google/gemini-flash-1.5"
-                >Gemini Flash 1.5 (Very cheap)</option
+              <option value="openrouter/google/gemini-3-flash-preview"
+                >Gemini Flash 3 Preview (Very cheap)</option
               >
               <option value="openrouter/meta-llama/llama-3.1-70b-instruct"
                 >Llama 3.1 70B (Open source)</option
+              >
+              <option value="openrouter/moonshotai/kimi-k2.6">
+                Kimi K2.6</option
               >
             </optgroup>
             <optgroup label="🖥️ Ollama (Local - Free)">
@@ -732,17 +810,20 @@
             class="input-field"
           >
             <optgroup label="☁️ OpenRouter (Cloud)">
-              <option value="openrouter/anthropic/claude-3-5-sonnet-20241022"
-                >Claude 3.5 Sonnet (Best quality)</option
+              <option value="openrouter/anthropic/claude-sonnet-4.6"
+                >Claude 4.6 Sonnet (Best quality)</option
               >
               <option value="openrouter/anthropic/claude-3-haiku-20240307"
                 >Claude 3 Haiku (Fast + cheap)</option
               >
-              <option value="openrouter/google/gemini-flash-1.5"
-                >Gemini Flash 1.5 (Very cheap)</option
+              <option value="openrouter/google/gemini-3-flash-preview"
+                >Gemini Flash 3 Preview (Very cheap)</option
               >
               <option value="openrouter/meta-llama/llama-3.1-70b-instruct"
                 >Llama 3.1 70B (Open source)</option
+              >
+              <option value="openrouter/moonshotai/kimi-k2.6">
+                Kimi K2.6</option
               >
             </optgroup>
             <optgroup label="🖥️ Ollama (Local - Free)">

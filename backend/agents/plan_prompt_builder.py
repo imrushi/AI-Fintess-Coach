@@ -38,10 +38,15 @@ PUSH_THROUGH OVERRIDE (athlete chose to ignore rest recommendation):
 - Cap intensity at Z3 maximum — no threshold or VO2max work
 - Add explicit warning in session description
 
+WEEKLY SCHEDULE CONSTRAINTS (non-negotiable):
+- Tuesday: athlete travels to office — ONLY upper-body strength/calisthenics allowed (no running, cycling, or swimming). No gym equipment assumed; bodyweight only.
+- Wednesday: athlete travels back 200 km — mandatory REST day. No training of any kind. Active recovery (light walk or breathwork) is acceptable but do not schedule a workout.
+
 STRENGTH SESSIONS:
 - Include calisthenics/strength work on low-intensity days where appropriate
 - Format strength exercises as a list under the "exercises" key: [{"exercise": str, "sets": int, "reps_or_duration": str, "notes": str}]
 - Beginner level: prioritise bodyweight compound movements (push-ups, dead bugs, pike push-ups, wall holds)
+- Tuesday strength must be upper-body only: push-ups, pike push-ups, diamond push-ups, tricep dips, wall handstand holds, shoulder taps, plank variations, dead bugs
 - Do not programme strength on the same day as Z4/Z5 sessions
 - For non-strength sessions, omit the exercises key or set it to []
 
@@ -60,6 +65,14 @@ SWIM SET STRUCTURE:
 - Include technique cues in notes (e.g. "bilateral breathing every 3", "high elbow catch")
 - For non-swim sessions, omit swim_sets or set to []
 
+YOGA SESSIONS:
+- Always include a dedicated breathing exercise block (5–10 min) — prescribe it explicitly in the exercises list
+- Breathing options: box breathing (4-4-4-4), diaphragmatic breathing, alternate-nostril breathing (Nadi Shodhana), 4-7-8 breathing for recovery, Wim Hof if appropriate
+- Include specific named yoga poses/flows in the exercises list, not just generic descriptions
+- Recommended poses by goal: hip flexor release → Low Lunge, Pigeon Pose, Lizard Pose; hamstrings → Standing Forward Fold, Seated Forward Fold, Pyramid Pose; back/core → Cat-Cow, Child's Pose, Supine Twist; shoulders/chest → Thread-the-Needle, Eagle Arms, Doorway Stretch; balance/strength → Warrior I, Warrior II, Warrior III, Chair Pose, Tree Pose; recovery flow → Legs-up-the-Wall, Reclined Butterfly, Savasana
+- Structure yoga sessions as: breathing warm-up → active poses → passive stretches → breathwork cool-down / Savasana
+- Set reps_or_duration to hold times (e.g. "45 sec each side") or breath counts (e.g. "5 breaths")
+
 MEDICAL/DIETARY:
 - Always respect medical conditions when prescribing sessions
 - Asthma: avoid high Z5 intervals; prefer Z2-Z3 sustained efforts
@@ -72,6 +85,13 @@ Schema: TrainingPlan with exactly 7 sessions (one per calendar day)."""
 
 def _v(val: object) -> str:
     return "~" if val is None else str(val)
+
+
+def _vol(v: object) -> str:
+    """Format volume — None or 0 means the discipline is unavailable."""
+    if v is None or v == 0:
+        return "N/A (not available)"
+    return f"{v} km"
 
 
 @dataclass
@@ -139,6 +159,9 @@ def build_planning_prompt(
     diet_allergy = profile.get("dietary_allergies", "none")
     swim_equipment = profile.get("swim_equipment") or "none"
     swim_strokes = profile.get("swim_strokes") or "not specified"
+    current_swim_km = profile.get("current_swim_km_week")
+    current_bike_km = profile.get("current_bike_km_week")
+    current_run_km = profile.get("current_run_km_week")
 
     sections: list[str] = []
 
@@ -152,8 +175,11 @@ def build_planning_prompt(
         f"Dietary preference: {diet_pref}\n"
         f"Allergies: {diet_allergy}\n"
         f"Preferred long day: Saturday\n"
+        f"Travel constraints: Tuesday = office day (upper-body only); Wednesday = long return trip (rest day)\n"
         f"Swim equipment available: {swim_equipment}\n"
-        f"Swim stroke proficiency: {swim_strokes}"
+        f"Swim stroke proficiency: {swim_strokes}\n"
+        f"Current weekly volume — Swim: {_vol(current_swim_km)} | Bike: {_vol(current_bike_km)} | Run: {_vol(current_run_km)}\n"
+        f"IMPORTANT: For any discipline marked N/A, do NOT prescribe sessions of that type."
     )
 
     # Section 2 — Readiness context
@@ -267,6 +293,141 @@ def build_planning_prompt(
         compressed_user_prompt=compressed,
         compression_ratio=round(ratio, 3),
         token_estimate=token_estimate,
+    )
+
+
+PATCH_SYSTEM_PROMPT = """\
+You are a world-class endurance coach. A weekly training plan already exists. \
+Your task is to update ONLY a single session for tomorrow based on today's readiness data.
+
+Apply the same gate rules as a full plan:
+- PROCEED: deliver the session as originally planned
+- PROCEED_WITH_CAUTION: reduce intensity one zone, cap duration at 75%
+- REST_RECOMMENDED: replace Z3+ with Z1-Z2, max 60min
+- MANDATORY_REST: active recovery only (yoga, walk, easy swim <30min)
+
+Weekly schedule constraints:
+- Tuesday: upper-body strength/calisthenics only (no run/bike/swim — athlete travels to office)
+- Wednesday: mandatory rest day (athlete travels back 200 km)
+
+Yoga sessions must include named poses, a breathing exercise block (box breathing, Nadi Shodhana, 4-7-8, etc.), \
+and be structured as: breathing warm-up → active poses → passive stretches → breathwork cool-down.
+
+Output ONLY a single valid compact JSON object matching the TrainingSession schema — \
+no markdown, no prose, no array wrapper.
+Schema: {date, day_of_week, sport, duration_min, intensity_zone, title, description, \
+key_focus, exercises, swim_sets, nutrition, override_applied, readiness_adjusted}"""
+
+
+@dataclass
+class PatchPromptPackage:
+    system_prompt: str
+    user_prompt: str
+    compressed_user_prompt: str
+    compression_ratio: float
+    token_estimate: int
+    tomorrow: str  # YYYY-MM-DD
+
+
+def build_daily_patch_prompt(
+    user_id: str,
+    readiness_report: ReadinessReport,
+    current_plan_json: dict,
+    override_choice: str | None = None,
+) -> PatchPromptPackage:
+    """Build a minimal prompt to update only tomorrow's session."""
+    from db.reader import get_user_profile
+
+    profile = get_user_profile(user_id) or {}
+    hr_zones = compute_hr_zones(user_id)
+
+    today = date.today()
+    tomorrow = today + timedelta(days=1)
+    tomorrow_str = str(tomorrow)
+
+    import calendar
+    tomorrow_dow = calendar.day_name[tomorrow.weekday()]
+
+    # Find tomorrow's existing session from the plan (if any)
+    existing_session = next(
+        (s for s in current_plan_json.get("sessions", []) if s.get("date") == tomorrow_str),
+        None,
+    )
+
+    goal_event = profile.get("goal_event", "not set")
+    medical = profile.get("medical_conditions", "none")
+    swim_equipment = profile.get("swim_equipment") or "none"
+    swim_strokes = profile.get("swim_strokes") or "not specified"
+    current_swim_km = profile.get("current_swim_km_week")
+    current_bike_km = profile.get("current_bike_km_week")
+    current_run_km = profile.get("current_run_km_week")
+
+    sections: list[str] = []
+
+    # Athlete context (minimal)
+    sections.append(
+        f"## Athlete\n"
+        f"Goal: {goal_event}\n"
+        f"Medical: {medical}\n"
+        f"Swim equipment: {swim_equipment}\n"
+        f"Swim strokes: {swim_strokes}\n"
+        f"Current weekly volume — Swim: {_vol(current_swim_km)} | Bike: {_vol(current_bike_km)} | Run: {_vol(current_run_km)}\n"
+        f"IMPORTANT: For any discipline marked N/A, do NOT prescribe sessions of that type."
+    )
+
+    # Readiness
+    r = readiness_report
+    sections.append(
+        f"## Today's Readiness\n"
+        f"Score: {r.readiness_score}/100 | Gate: {r.training_gate.value}\n"
+        f"Flags: {', '.join(r.flags) or 'none'}\n"
+        f"Narrative: {r.narrative}"
+    )
+
+    # HR Zones
+    if hr_zones:
+        zone_lines = "\n".join(f"{z}: {bpm}" for z, bpm in hr_zones["zones"].items())
+        sections.append(f"## HR Zones ({hr_zones['method']})\n{zone_lines}")
+
+    # Override
+    if override_choice == "push_through":
+        sections.append("## Override: PUSH THROUGH — -25% volume, cap Z3, add warning.")
+    elif override_choice == "rest_as_recommended":
+        sections.append("## Override: REST confirmed. Apply MANDATORY_REST rules.")
+
+    # Existing session for tomorrow
+    if existing_session:
+        sections.append(
+            f"## Planned session for tomorrow (to adapt if needed)\n"
+            + json.dumps(existing_session, separators=(",", ":"))
+        )
+    else:
+        sections.append(
+            f"## No session was planned for tomorrow — create an appropriate one."
+        )
+
+    # Task
+    sections.append(
+        f"## Task\n"
+        f"Update ONLY tomorrow's session: {tomorrow_str} ({tomorrow_dow}).\n"
+        f"If the existing session already satisfies the gate rules and no flags require adjustment, "
+        f"respond with exactly: {{\"no_change\": true}}\n"
+        f"Otherwise output a single TrainingSession JSON object. "
+        f"Set readiness_adjusted=true if you changed the session due to gate/flags.\n"
+        f"nutrition must have keys: pre_session, during_session, post_session."
+    )
+
+    user_prompt = "\n\n".join(sections)
+    compressed, ratio = compress(user_prompt)
+    token_estimate = (len(PATCH_SYSTEM_PROMPT) + len(compressed)) // 4
+
+    return PatchPromptPackage(
+        system_prompt=PATCH_SYSTEM_PROMPT,
+        user_prompt=user_prompt,
+        compressed_user_prompt=compressed,
+        compression_ratio=round(ratio, 3),
+        token_estimate=token_estimate,
+        tomorrow=tomorrow_str,
     )
 
 

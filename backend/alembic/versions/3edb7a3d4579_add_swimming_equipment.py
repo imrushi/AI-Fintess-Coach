@@ -20,10 +20,13 @@ depends_on: Union[str, Sequence[str], None] = None
 
 def upgrade() -> None:
     """Upgrade schema."""
-    # TEXT and String are identical in SQLite — no DDL needed
-    pass
+    with op.batch_alter_table('user_profiles') as batch_op:
+        batch_op.add_column(sa.Column('swim_equipment', sa.String(), nullable=True))
+        batch_op.add_column(sa.Column('swim_strokes', sa.String(), nullable=True))
 
 
 def downgrade() -> None:
     """Downgrade schema."""
-    pass
+    with op.batch_alter_table('user_profiles') as batch_op:
+        batch_op.drop_column('swim_strokes')
+        batch_op.drop_column('swim_equipment')

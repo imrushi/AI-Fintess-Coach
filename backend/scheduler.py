@@ -24,7 +24,7 @@ class NightlyScheduler:
         self.scheduler.add_job(
             self.run_garmin_sync,
             trigger="cron",
-            hour=3,
+            hour=23,
             minute=0,
             id="garmin_sync",
             replace_existing=True,
@@ -33,15 +33,15 @@ class NightlyScheduler:
         self.scheduler.add_job(
             self.run_daily_pipeline,
             trigger="cron",
-            hour=6,
-            minute=0,
+            hour=23,
+            minute=30,
             id="daily_pipeline",
             replace_existing=True,
             misfire_grace_time=3600,
         )
         self.scheduler.start()
         self.is_running = True
-        logger.info("Scheduler started: Garmin sync at 03:00 UTC, pipeline at 06:00 UTC")
+        logger.info("Scheduler started: Garmin sync at 23:00 UTC (04:30 IST), pipeline at 23:30 UTC (05:00 IST)")
 
     def stop(self) -> None:
         self.scheduler.shutdown(wait=False)

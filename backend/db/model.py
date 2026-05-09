@@ -75,6 +75,9 @@ class UserProfile(Base):
     swim_strokes: Mapped[str | None] = mapped_column(String, nullable=True)    # e.g. "freestyle:expert,breaststroke:expert,backstroke:beginner,butterfly:learning"
     date_of_birth: Mapped[date | None] = mapped_column(Date, nullable=True)
     lthr: Mapped[int | None] = mapped_column(Integer, nullable=True)           # Lactate Threshold HR in bpm
+    current_swim_km_week: Mapped[float | None] = mapped_column(Float, nullable=True)
+    current_bike_km_week: Mapped[float | None] = mapped_column(Float, nullable=True)
+    current_run_km_week: Mapped[float | None] = mapped_column(Float, nullable=True)
     model_analysis: Mapped[str] = mapped_column(
         String, default="openrouter/anthropic/claude-sonnet-4.6"
     )

@@ -83,6 +83,9 @@ def _profile_to_dict(p: UserProfile) -> dict:
         "swim_strokes": p.swim_strokes,
         "date_of_birth": str(p.date_of_birth) if p.date_of_birth else None,
         "lthr": p.lthr,
+        "current_swim_km_week": p.current_swim_km_week,
+        "current_bike_km_week": p.current_bike_km_week,
+        "current_run_km_week": p.current_run_km_week,
         "model_analysis": p.model_analysis,
         "model_planning": p.model_planning,
         "updated_at": p.updated_at.isoformat() if p.updated_at else None,
@@ -107,6 +110,11 @@ class UpdateProfileRequest(BaseModel):
     swim_strokes: str | None = None    # e.g. "freestyle:expert,breaststroke:expert,backstroke:beginner,butterfly:learning"
     date_of_birth: date | None = None
     lthr: int | None = None            # Lactate Threshold HR in bpm
+    current_swim_km_week: float | None = None
+    current_bike_km_week: float | None = None
+    current_run_km_week: float | None = None
+    model_analysis: str | None = None
+    model_planning: str | None = None
 
     @field_validator("goal_date")
     @classmethod
@@ -124,6 +132,15 @@ class UpdateProfileRequest(BaseModel):
         if normalised not in _VALID_DIETS:
             raise ValueError(f"dietary_preference must be one of {_VALID_DIETS}")
         return normalised
+
+    @field_validator("model_analysis", "model_planning")
+    @classmethod
+    def valid_model_prefix(cls, v: str | None) -> str | None:
+        if v is None:
+            return v
+        if not (v.startswith("openrouter/") or v.startswith("ollama/")):
+            raise ValueError("Model must start with 'openrouter/' or 'ollama/'")
+        return v
 
 
 class RunAnalysisRequest(BaseModel):
