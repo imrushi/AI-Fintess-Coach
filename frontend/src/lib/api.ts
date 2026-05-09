@@ -54,6 +54,18 @@ export function storeUserId(id: string): void {
   localStorage.setItem(USER_ID_KEY, id)
 }
 
+export function clearStoredUserId(): void {
+  if (typeof window === 'undefined') return
+  localStorage.removeItem(USER_ID_KEY)
+}
+
+export async function loginByEmail(email: string): Promise<{ user_id: string; email: string }> {
+  return apiFetch('/auth/login', {
+    method: 'POST',
+    body: JSON.stringify({ email }),
+  })
+}
+
 // ── Core fetch helper ─────────────────────────────────────────────────────
 
 async function apiFetch<T>(path: string, options?: RequestInit): Promise<T> {
@@ -113,7 +125,11 @@ export async function submitCheckIn(data: CheckInRequest): Promise<CheckInRespon
 }
 
 export async function getTodayCheckIn(userId: string): Promise<CheckInResponse | null> {
-  const res = await fetch(`/api/checkin/today/${userId}`)
+  return getCheckIn(userId, new Date().toISOString().split('T')[0])
+}
+
+export async function getCheckIn(userId: string, checkDate: string): Promise<CheckInResponse | null> {
+  const res = await fetch(`/api/checkin/${userId}/${checkDate}`)
   if (res.status === 404) return null
   if (!res.ok) {
     let message = 'API error'

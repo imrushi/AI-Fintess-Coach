@@ -1,7 +1,8 @@
 <script lang="ts">
   import "../app.css";
   import { onMount } from "svelte";
-  import { page } from "$app/stores";
+  import { page, navigating } from "$app/stores";
+  import { goto } from "$app/navigation";
   import {
     userId,
     todayReport,
@@ -20,6 +21,7 @@
     getOverridePrompt,
     getStoredUserId,
     storeUserId,
+    clearStoredUserId,
     runFullPipeline,
   } from "$lib/api";
   import { gateToColor, todayStr } from "$lib/types";
@@ -141,7 +143,10 @@
       uid = import.meta.env.VITE_DEV_USER_ID ?? null;
       if (uid) storeUserId(uid);
     }
-    if (!uid) return;
+    if (!uid) {
+      goto("/login");
+      return;
+    }
     userId.set(uid);
 
     isLoading.set(true);
@@ -159,6 +164,16 @@
       isLoading.set(false);
     }
   });
+
+  // ── Logout ──────────────────────────────────────────────────────────
+  function handleLogout() {
+    clearStoredUserId();
+    userId.set(null);
+    currentPlan.set(null);
+    todayReport.set(null);
+    overridePrompt.set(null);
+    goto("/login");
+  }
 
   // ── Toast icon helper ───────────────────────────────────────────────
   function toastIcon(type: string): string {
@@ -217,120 +232,137 @@
 {/if}
 
 <!-- ── Root layout ────────────────────────────────────────────────────── -->
-<div class="min-h-screen flex">
-  <!-- ── Desktop sidebar (lg+) ──────────────────────────────────────── -->
-  <aside
-    class="hidden lg:flex flex-col fixed left-0 top-0 bottom-0 w-64
+{#if $page.url.pathname === "/login"}
+  {@render children()}
+{:else}
+  <div class="min-h-screen flex">
+    <!-- ── Desktop sidebar (lg+) ──────────────────────────────────────── -->
+    <aside
+      class="hidden lg:flex flex-col fixed left-0 top-0 bottom-0 w-64
                 bg-slate-900 border-r border-slate-700/60 text-white z-40"
-  >
-    <!-- Logo -->
-    <div class="px-6 py-5 border-b border-white/10 flex items-center gap-2">
-      <span class="text-yellow-400 text-xl">⚡</span>
-      <span class="font-display font-bold text-lg tracking-tight"
-        >FitCoach AI</span
-      >
-    </div>
+    >
+      <!-- Logo -->
+      <div class="px-6 py-5 border-b border-white/10 flex items-center gap-2">
+        <span class="text-yellow-400 text-xl">⚡</span>
+        <span class="font-display font-bold text-lg tracking-tight"
+          >FitCoach AI</span
+        >
+      </div>
 
-    <!-- Nav links -->
-    <nav class="flex-1 px-3 py-4 space-y-1">
-      {#each NAV_DESKTOP as link}
-        {@const active = isActive(link.href)}
-        <a
-          href={link.href}
-          class="flex items-center gap-3 px-3 py-2.5 rounded-lg text-sm font-medium
+      <!-- Nav links -->
+      <nav class="flex-1 px-3 py-4 space-y-1">
+        {#each NAV_DESKTOP as link}
+          {@const active = isActive(link.href)}
+          <a
+            href={link.href}
+            class="flex items-center gap-3 px-3 py-2.5 rounded-lg text-sm font-medium
                  transition-all duration-150
                  {active
-            ? 'bg-blue-600/10 text-blue-400 border-l-4 border-blue-500 pl-[8px]'
-            : 'text-slate-400 hover:text-white hover:bg-white/5 border-l-4 border-transparent pl-[8px]'}"
+              ? 'bg-blue-600/10 text-blue-400 border-l-4 border-blue-500 pl-[8px]'
+              : 'text-slate-400 hover:text-white hover:bg-white/5 border-l-4 border-transparent pl-[8px]'}"
+          >
+            <span class="text-base w-5 text-center">{link.icon}</span>
+            {link.label}
+          </a>
+        {/each}
+      </nav>
+
+      <!-- Readiness pill + data freshness -->
+      <div class="px-5 py-4 border-t border-white/10 space-y-2">
+        {#if $todayReport}
+          <div class="flex items-center gap-3">
+            <div class="w-2.5 h-2.5 rounded-full flex-shrink-0 {gateBg}"></div>
+            <div class="min-w-0">
+              <p class="text-xs text-slate-400 leading-tight">
+                Today's Readiness
+              </p>
+              <p
+                class="text-white font-semibold text-sm leading-tight truncate"
+              >
+                {$todayReport.readiness_score}/100
+                <span class="font-normal text-slate-400"
+                  >· {$todayReport.training_gate.replace(/_/g, " ")}</span
+                >
+              </p>
+            </div>
+          </div>
+          <p class="text-xs {freshness.cls}">Last updated: {freshness.label}</p>
+        {:else}
+          <p class="text-xs text-slate-500">No readiness data yet</p>
+        {/if}
+      </div>
+
+      <!-- Keyboard shortcut hint -->
+      <div class="px-5 pb-4">
+        <p class="text-xs text-slate-600 font-mono">R — Run Pipeline</p>
+      </div>
+
+      <!-- Logout -->
+      <div class="px-4 pb-5">
+        <button
+          onclick={handleLogout}
+          class="w-full flex items-center gap-2 px-3 py-2 rounded-lg text-sm text-slate-500
+               hover:text-red-400 hover:bg-red-900/20 transition"
         >
-          <span class="text-base w-5 text-center">{link.icon}</span>
-          {link.label}
+          <span>→</span> Sign out
+        </button>
+      </div>
+    </aside>
+
+    <!-- ── Main content area ──────────────────────────────────────────── -->
+    <div class="flex-1 flex flex-col lg:ml-64 min-h-screen">
+      <!-- Top bar -->
+      <header
+        class="hidden lg:flex items-center justify-between
+                   px-6 py-4 bg-slate-900 border-b border-slate-700/60 sticky top-0 z-30"
+      >
+        <h1 class="text-lg font-semibold text-slate-100">{pageTitle}</h1>
+        <button
+          onclick={handleRunPipeline}
+          disabled={$pipelineRunning}
+          class="btn-primary flex items-center gap-2 disabled:opacity-60 disabled:cursor-not-allowed"
+        >
+          {#if $pipelineRunning}
+            <span
+              class="inline-block w-3.5 h-3.5 border-2 border-white/40 border-t-white
+                       rounded-full animate-spin"
+            ></span>
+            Running…
+          {:else}
+            <span>⚡</span> Run Pipeline
+          {/if}
+        </button>
+      </header>
+
+      <!-- Page content -->
+      <main class="flex-1 overflow-y-auto pb-20 lg:pb-0">
+        {@render children()}
+      </main>
+    </div>
+
+    <!-- ── Mobile bottom tab bar ──────────────────────────────────────── -->
+    <nav
+      class="lg:hidden fixed bottom-0 left-0 right-0 z-40
+              bg-slate-900 border-t border-slate-700/60 shadow-lg
+              flex items-stretch"
+    >
+      {#each NAV_MOBILE as tab}
+        {@const active = isActive(tab.href)}
+        <a
+          href={tab.href}
+          class="flex-1 flex flex-col items-center justify-center py-2 gap-0.5 text-xs font-medium
+               transition-colors
+               {active
+            ? 'text-blue-500'
+            : 'text-slate-400 hover:text-slate-200'}"
+        >
+          <span class="text-lg leading-tight">{tab.icon}</span>
+          <span class="leading-tight">{tab.label}</span>
         </a>
       {/each}
     </nav>
-
-    <!-- Readiness pill + data freshness -->
-    <div class="px-5 py-4 border-t border-white/10 space-y-2">
-      {#if $todayReport}
-        <div class="flex items-center gap-3">
-          <div class="w-2.5 h-2.5 rounded-full flex-shrink-0 {gateBg}"></div>
-          <div class="min-w-0">
-            <p class="text-xs text-slate-400 leading-tight">
-              Today's Readiness
-            </p>
-            <p class="text-white font-semibold text-sm leading-tight truncate">
-              {$todayReport.readiness_score}/100
-              <span class="font-normal text-slate-400"
-                >· {$todayReport.training_gate.replace(/_/g, " ")}</span
-              >
-            </p>
-          </div>
-        </div>
-        <p class="text-xs {freshness.cls}">Last updated: {freshness.label}</p>
-      {:else}
-        <p class="text-xs text-slate-500">No readiness data yet</p>
-      {/if}
-    </div>
-
-    <!-- Keyboard shortcut hint -->
-    <div class="px-5 pb-4">
-      <p class="text-xs text-slate-600 font-mono">R — Run Pipeline</p>
-    </div>
-  </aside>
-
-  <!-- ── Main content area ──────────────────────────────────────────── -->
-  <div class="flex-1 flex flex-col lg:ml-64 min-h-screen">
-    <!-- Top bar -->
-    <header
-      class="hidden lg:flex items-center justify-between
-                   px-6 py-4 bg-slate-900 border-b border-slate-700/60 sticky top-0 z-30"
-    >
-      <h1 class="text-lg font-semibold text-slate-100">{pageTitle}</h1>
-      <button
-        onclick={handleRunPipeline}
-        disabled={$pipelineRunning}
-        class="btn-primary flex items-center gap-2 disabled:opacity-60 disabled:cursor-not-allowed"
-      >
-        {#if $pipelineRunning}
-          <span
-            class="inline-block w-3.5 h-3.5 border-2 border-white/40 border-t-white
-                       rounded-full animate-spin"
-          ></span>
-          Running…
-        {:else}
-          <span>⚡</span> Run Pipeline
-        {/if}
-      </button>
-    </header>
-
-    <!-- Page content -->
-    <main class="flex-1 overflow-y-auto pb-20 lg:pb-0">
-      {@render children()}
-    </main>
   </div>
-
-  <!-- ── Mobile bottom tab bar ──────────────────────────────────────── -->
-  <nav
-    class="lg:hidden fixed bottom-0 left-0 right-0 z-40
-              bg-slate-900 border-t border-slate-700/60 shadow-lg
-              flex items-stretch"
-  >
-    {#each NAV_MOBILE as tab}
-      {@const active = isActive(tab.href)}
-      <a
-        href={tab.href}
-        class="flex-1 flex flex-col items-center justify-center py-2 gap-0.5 text-xs font-medium
-               transition-colors
-               {active
-          ? 'text-blue-500'
-          : 'text-slate-400 hover:text-slate-200'}"
-      >
-        <span class="text-lg leading-tight">{tab.icon}</span>
-        <span class="leading-tight">{tab.label}</span>
-      </a>
-    {/each}
-  </nav>
-</div>
+{/if}
 
 <style>
   @keyframes slide-up {

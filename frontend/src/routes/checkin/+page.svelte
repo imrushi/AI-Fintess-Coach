@@ -1,5 +1,4 @@
 <script lang="ts">
-  import { onMount } from "svelte";
   import {
     userId,
     todayReport,
@@ -7,9 +6,9 @@
     todaySession,
     addToast,
   } from "$lib/stores";
-  import { submitCheckIn, getTodayCheckIn, getCurrentPlan } from "$lib/api";
+  import { submitCheckIn, getCheckIn, getCurrentPlan } from "$lib/api";
   import type { CheckInRequest } from "$lib/types";
-  import { todayStr, sportToEmoji } from "$lib/types";
+  import { sportToEmoji } from "$lib/types";
   import {
     MessageSquare,
     Gauge,
@@ -32,15 +31,17 @@
     override_reason: "",
   });
 
-  // ── Yesterday's session ───────────────────────────────────────────────
-  const yesterdayStr = $derived(() => {
+  let selectedDate = $state<"today" | "yesterday">("yesterday");
+
+  // ── Check-in date (derived from tab selection) ─────────────────────────
+  const checkInDateStr = $derived(() => {
     const d = new Date();
-    d.setDate(d.getDate() - 1);
+    if (selectedDate === "yesterday") d.setDate(d.getDate() - 1);
     return d.toISOString().split("T")[0];
   });
 
-  const yesterdaySession = $derived(
-    $currentPlan?.sessions.find((s) => s.date === yesterdayStr()) ?? null,
+  const referenceSession = $derived(
+    $currentPlan?.sessions.find((s) => s.date === checkInDateStr()) ?? null,
   );
 
   // ── RPE helpers ───────────────────────────────────────────────────────
@@ -94,19 +95,22 @@
         form.free_text.trim().length > 0),
   );
 
-  // ── Load existing check-in on mount ───────────────────────────────────
-  onMount(async () => {
+  // ── Load existing check-in (reloads when date tab changes) ───────────
+  $effect(() => {
     const uid = $userId;
+    const dateStr = checkInDateStr();
     if (!uid) return;
-    try {
-      const existing = await getTodayCheckIn(uid);
-      if (existing) {
-        existingCheckIn = existing;
-        submitted = true;
-      }
-    } catch (e: unknown) {
-      // no check-in yet — silent
-    }
+    submitted = false;
+    existingCheckIn = null;
+    planUpdated = false;
+    getCheckIn(uid, dateStr)
+      .then((existing) => {
+        if (existing) {
+          existingCheckIn = existing;
+          submitted = true;
+        }
+      })
+      .catch(() => {});
   });
 
   // ── Submit handler ────────────────────────────────────────────────────
@@ -118,7 +122,7 @@
     try {
       const req: CheckInRequest = {
         user_id: uid,
-        check_in_date: todayStr(),
+        check_in_date: checkInDateStr(),
         perceived_effort: form.perceived_effort,
         mood: form.mood,
         free_text: form.free_text.trim() || null,
@@ -148,26 +152,34 @@
       loading = false;
     }
   }
-
-  // ── Today's date display ──────────────────────────────────────────────
-  const todayDisplay = new Date().toLocaleDateString("en-GB", {
-    weekday: "long",
-    day: "numeric",
-    month: "long",
-    year: "numeric",
-  });
 </script>
 
 <div class="max-w-2xl mx-auto py-8 px-4 space-y-6 animate-fade-in">
   <!-- ══ HEADER ══════════════════════════════════════════════════════════ -->
-  <div>
-    <h1 class="text-2xl font-bold text-slate-100 flex items-center gap-2">
-      <MessageSquare size={22} class="text-blue-500" />
-      Daily Check-in
-    </h1>
-    <p class="text-slate-400 text-sm mt-1">
-      {todayDisplay} — How are you feeling?
-    </p>
+  <div class="space-y-3">
+    <div>
+      <h1 class="text-2xl font-bold text-slate-100 flex items-center gap-2">
+        <MessageSquare size={22} class="text-blue-500" />
+        Daily Check-in
+      </h1>
+      <p class="text-slate-400 text-sm mt-1">
+        Log your workout effort — the AI uses it to adjust your plan.
+      </p>
+    </div>
+    <!-- Date toggle -->
+    <div class="flex rounded-xl border border-slate-700 bg-slate-800 p-1 gap-1">
+      {#each [{ key: "yesterday", label: "Yesterday" }, { key: "today", label: "Today" }] as const as tab}
+        <button
+          onclick={() => (selectedDate = tab.key)}
+          class="flex-1 py-1.5 px-3 rounded-lg text-sm font-medium transition-all
+                 {selectedDate === tab.key
+            ? 'bg-blue-600 text-white shadow'
+            : 'text-slate-400 hover:text-slate-200'}"
+        >
+          {tab.label}
+        </button>
+      {/each}
+    </div>
   </div>
 
   <!-- ══ PLAN UPDATED TOAST ═══════════════════════════════════════════════ -->
@@ -232,15 +244,17 @@
 
   {#if !submitted}
     <!-- ══ YESTERDAY REFERENCE ════════════════════════════════════════════ -->
-    {#if yesterdaySession}
-      {@const ys = yesterdaySession}
+    {#if referenceSession}
+      {@const ys = referenceSession}
       <div class="card px-4 py-3 flex items-center gap-3">
         <span class="text-2xl leading-none" role="img" aria-label={ys.sport}
           >{sportToEmoji(ys.sport)}</span
         >
         <div class="min-w-0">
           <p class="text-xs text-slate-400 font-medium uppercase tracking-wide">
-            Yesterday's session
+            {selectedDate === "today"
+              ? "Today's session"
+              : "Yesterday's session"}
           </p>
           <p class="text-sm font-medium text-slate-200 truncate">
             {ys.title}
@@ -265,7 +279,7 @@
         <Gauge size={18} class="text-slate-400 shrink-0" />
         <div>
           <p class="font-semibold text-slate-100 text-sm">
-            Rate yesterday's effort
+            Rate {selectedDate === "today" ? "today's" : "yesterday's"} effort
           </p>
           <p class="text-xs text-slate-400">
             RPE 1–10 (Rating of Perceived Exertion)

@@ -23,6 +23,7 @@ from db.model import (
     Job,
     ReadinessReportRow,
     TrainingPlanRow,
+    User,
     UserFeedback,
     UserProfile,
     Workout,
@@ -195,6 +196,30 @@ class RunPipelineResponse(BaseModel):
 @app.get("/health")
 def health():
     return {"status": "ok", "version": "0.1.0"}
+
+
+# ── Auth ──────────────────────────────────────────────────────────────────
+
+
+class LoginRequest(BaseModel):
+    email: str
+
+
+@app.post("/api/auth/login")
+def login(body: LoginRequest):
+    """Look up a user by email and return their user_id.
+    No password — this is a personal single-user app.
+    """
+    email = body.email.strip().lower()
+    with get_session() as session:
+        user = session.execute(
+            select(User).where(User.email == email)
+        ).scalar_one_or_none()
+        if user is None:
+            raise HTTPException(status_code=404, detail="No account found for that email.")
+        user_id = user.id
+        user_email = user.email
+    return {"user_id": user_id, "email": user_email}
 
 
 @app.get("/api/scheduler/status")
@@ -510,6 +535,32 @@ def get_today_checkin(user_id: str):
             select(UserFeedback).where(
                 UserFeedback.user_id == user_id,
                 UserFeedback.feedback_date == date.today(),
+            )
+        ).scalar_one_or_none()
+        if row is None:
+            return None
+        return {
+            "id": row.id,
+            "feedback_date": str(row.feedback_date),
+            "perceived_effort": row.perceived_effort,
+            "mood": row.mood,
+            "free_text": row.free_text,
+            "override_choice": row.override_choice,
+            "override_reason": row.override_reason,
+        }
+
+
+@app.get("/api/checkin/{user_id}/{check_date}")
+def get_checkin_for_date(user_id: str, check_date: str):
+    try:
+        target = date.fromisoformat(check_date)
+    except ValueError:
+        raise HTTPException(status_code=422, detail="Invalid date, expected YYYY-MM-DD")
+    with get_session() as session:
+        row = session.execute(
+            select(UserFeedback).where(
+                UserFeedback.user_id == user_id,
+                UserFeedback.feedback_date == target,
             )
         ).scalar_one_or_none()
         if row is None:

@@ -1,0 +1,52 @@
+services:
+  backend:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    # Raspberry Pi is ARM64 — images must support it
+    platform: linux/arm64
+    volumes:
+      - db-data:/data
+    env_file:
+      - ./backend/.env
+    environment:
+      DATABASE_URL: sqlite:////data/fitness.db
+      GARMIN_SESSION_DIR: /data
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8000/health')"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 20s
+
+  frontend:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile
+    platform: linux/arm64
+    environment:
+      PORT: "3000"
+      HOST: "0.0.0.0"
+      # Change this to your Pi's hostname/IP if accessing from other devices
+      ORIGIN: "http://localhost"
+    restart: unless-stopped
+    depends_on:
+      backend:
+        condition: service_healthy
+
+  nginx:
+    image: nginx:alpine
+    platform: linux/arm64
+    ports:
+      - "80:80"
+    volumes:
+      - ./nginx.conf:/etc/nginx/conf.d/default.conf:ro
+    depends_on:
+      - frontend
+      - backend
+    restart: unless-stopped
+
+volumes:
+  db-data:
+    # SQLite DB and Garmin session persist across restarts/upgrades

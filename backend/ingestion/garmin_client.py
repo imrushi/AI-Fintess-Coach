@@ -1,9 +1,14 @@
+import os
 import pickle
 from pathlib import Path
 
 from garminconnect import Garmin, GarminConnectAuthenticationError
 
-_SESSION_PATH = Path(__file__).resolve().parent / ".garmin_session.pkl"
+_SESSION_DIR = os.environ.get("GARMIN_SESSION_DIR", "")
+if _SESSION_DIR:
+    _SESSION_PATH = Path(_SESSION_DIR) / ".garmin_session.pkl"
+else:
+    _SESSION_PATH = Path(__file__).resolve().parent / ".garmin_session.pkl"
 
 
 class GarminClient:
