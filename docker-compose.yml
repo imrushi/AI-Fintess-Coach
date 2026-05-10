@@ -6,7 +6,7 @@ services:
     # Raspberry Pi is ARM64 — images must support it
     platform: linux/arm64
     volumes:
-      - db-data:/data
+      - ./backend/db-data:/data
     env_file:
       - ./backend/.env
     environment:

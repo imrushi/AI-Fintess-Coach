@@ -95,13 +95,21 @@ class AnalysisAgent:
 
         assert report is not None and response is not None
 
-        # Step 4 — Persist to DB
+        # Step 4 — Persist to DB (upsert: reuse existing row ID if present)
+        report_date_obj = date.fromisoformat(target_date)
         with get_session() as session:
+            existing = session.execute(
+                select(ReadinessReportRow).where(
+                    ReadinessReportRow.user_id == self.user_id,
+                    ReadinessReportRow.report_date == report_date_obj,
+                )
+            ).scalar_one_or_none()
+            row_id = existing.id if existing else str(uuid4())
             session.merge(
                 ReadinessReportRow(
-                    id=str(uuid4()),
+                    id=row_id,
                     user_id=self.user_id,
-                    report_date=date.fromisoformat(target_date),
+                    report_date=report_date_obj,
                     readiness_score=report.readiness_score,
                     readiness_label=report.readiness_label.value,
                     training_gate=report.training_gate.value,
