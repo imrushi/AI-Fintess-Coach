@@ -5,15 +5,17 @@ from __future__ import annotations
 import json
 import logging
 from dataclasses import dataclass
-from datetime import date
+from datetime import date, timedelta
 
 from agents.caveman import compress
+from agents.data_freshness import DataFreshnessReport, assess_data_freshness
 from db.reader import (
     compute_acwr,
     get_hrv_baseline,
     get_recent_feedback,
     get_recent_metrics,
     get_recent_workouts,
+    get_todays_recovery,
     get_user_profile,
     get_weeks_to_goal,
 )
@@ -33,6 +35,11 @@ You assess:
 - Resting HR trend (elevated = fatigue signal)
 - Recent workout quality vs RPE
 - Athlete's subjective feedback
+
+The TODAY'S RECOVERY section contains last night's sleep data
+(the sleep that ended this morning). This is the primary signal
+for today's readiness gate. The 14-day table provides trend context.
+Weight today's recovery data at least 3x more than historical averages.
 
 Training gate rules (apply strictly):
 - PROCEED: readiness >= 70, no critical flags
@@ -86,10 +93,15 @@ def build_analysis_prompt(
     user_id: str,
     target_date: str,
     context_injection: str | None = None,
+    freshness: DataFreshnessReport | None = None,
 ) -> AnalysisPromptPackage:
     """Assemble the full Analysis-Agent prompt from DB data."""
 
     # ── Load data ────────────────────────────────────────────────────
+    # Use pre-computed freshness if provided, otherwise compute it now
+    if freshness is None:
+        freshness = assess_data_freshness(user_id)
+    today_recovery = get_todays_recovery(user_id)
     metrics = get_recent_metrics(user_id, days=14)
     hrv_baseline = get_hrv_baseline(user_id, days=28)
     workouts = get_recent_workouts(user_id, days=7)
@@ -110,14 +122,61 @@ def build_analysis_prompt(
         f"Fitness level: {fitness}",
     ]
 
-    # ── Section 2 — 14-day metrics table ─────────────────────────────
+    # ── Section 2 — Today's recovery (highlighted) ──────────────────
+    today_date = date.today()
+    yesterday_date = today_date - timedelta(days=1)
+    if today_recovery["data_available"]:
+        slp_min = today_recovery["sleep_duration_min"]
+        slp_hrs = f"{slp_min // 60}h {slp_min % 60}m" if slp_min is not None else "~"
+        hrv_now = today_recovery["hrv_last_night_ms"]
+        if hrv_now is not None and hrv_baseline is not None:
+            hrv_dev = f"{round((hrv_now - hrv_baseline) / hrv_baseline * 100):+.1f}%"
+        else:
+            hrv_dev = "~"
+        baseline_str = f"{hrv_baseline:.1f} ms" if hrv_baseline is not None else "insufficient data"
+        available_count = sum([
+            today_recovery["sleep_score"] is not None,
+            today_recovery["hrv_last_night_ms"] is not None,
+            today_recovery["body_battery_min"] is not None,
+            today_recovery["deep_sleep_min"] is not None,
+            today_recovery["rem_sleep_min"] is not None,
+            today_recovery["stress_avg"] is not None,
+        ])
+        sections.append(
+            f"## TODAY'S RECOVERY (Last Night: {yesterday_date} → {today_date} morning)\n"
+            f"\u26a0\ufe0f  This is the MOST IMPORTANT signal — use this for today's readiness gate.\n\n"
+            f"Sleep score:      {_v(today_recovery['sleep_score'])} / 100\n"
+            f"Sleep duration:   {_v(slp_min)} min ({slp_hrs})\n"
+            f"Deep sleep:       {_v(today_recovery['deep_sleep_min'])} min\n"
+            f"REM sleep:        {_v(today_recovery['rem_sleep_min'])} min\n"
+            f"HRV last night:   {_v(hrv_now)} ms  (baseline: {baseline_str}, deviation: {hrv_dev})\n"
+            f"Body battery AM:  {_v(today_recovery['body_battery_min'])} → {_v(today_recovery['body_battery_max'])}\n"
+            f"Morning stress:   {_v(today_recovery['stress_avg'])}\n\n"
+            f"Data completeness: {available_count} / 6 signals available"
+        )
+    else:
+        sections.append(
+            f"## TODAY'S RECOVERY\n"
+            f"\u26a0\ufe0f  Last night's sleep data NOT YET SYNCED from Garmin.\n"
+            f"Garmin may not have uploaded this morning's data yet.\n"
+            f"Fall back to yesterday's sleep data for the readiness gate.\n"
+            f"Reduce confidence in readiness score — note data_completeness_pct accordingly."
+        )
+
+    # ── Section 3 — 14-day metrics table ─────────────────────────────
     header = "date | steps | rhr | hrv_ms | bb_min | bb_max | slp_score | slp_min | deep_min | stress | vo2max | acute_load | chronic_load | acwr"
     rows: list[str] = []
-    for m in reversed(metrics):  # newest first
+    for i, m in enumerate(reversed(metrics)):  # newest first (today at top)
+        if i == 0:
+            label = "  ← TODAY (most recent)"
+        elif i == 1:
+            label = "  ← YESTERDAY"
+        else:
+            label = ""
         rows.append(
             " | ".join(
                 [
-                    str(m.get("date", "?")),
+                    str(m.get("date", "?")) + label,
                     _v(m.get("total_steps")),
                     _v(m.get("avg_resting_hr")),
                     _v(m.get("hrv_last_night_ms")),
@@ -138,11 +197,11 @@ def build_analysis_prompt(
         f"## Daily Metrics (14d, newest first)\n{header}\n" + "\n".join(rows)
     )
 
-    # ── Section 3 — HRV baseline ────────────────────────────────────
+    # ── Section 4 — HRV baseline ────────────────────────────────────
     baseline_str = f"{hrv_baseline:.1f}" if hrv_baseline is not None else "insufficient data"
     sections.append(f"## HRV Baseline (28d avg): {baseline_str} ms")
 
-    # ── Section 4 — Training load ───────────────────────────────────
+    # ── Section 5 — Training load ───────────────────────────────────
     # Use stored Garmin training load values from the most recent day if available
     latest = metrics[-1] if metrics else {}
     stored_acute = latest.get("acute_load")
@@ -158,19 +217,19 @@ def build_analysis_prompt(
         f"ACWR (computed): {_v(acwr)}"
     )
 
-    # ── Section 5 — Recent workouts ─────────────────────────────────
+    # ── Section 6 — Recent workouts ─────────────────────────────────
     sections.append(
         f"## Recent Workouts (7d)\n"
         + json.dumps(workouts, separators=(",", ":"), default=str)
     )
 
-    # ── Section 6 — Subjective feedback ─────────────────────────────
+    # ── Section 7 — Subjective feedback ─────────────────────────────
     sections.append(
         f"## Athlete Feedback (7d)\n"
         + json.dumps(feedback, separators=(",", ":"), default=str)
     )
 
-    # ── Section 7 — Task ────────────────────────────────────────────
+    # ── Section 8 — Task ────────────────────────────────────────────
     sections.append(
         f"## Task\nAnalyse readiness for: {target_date}\nOutput ReadinessReport JSON now."
     )

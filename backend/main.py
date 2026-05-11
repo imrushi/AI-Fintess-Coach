@@ -34,6 +34,11 @@ from scheduler import nightly_scheduler
 
 logger = logging.getLogger(__name__)
 
+
+class _HealthCheckFilter(logging.Filter):
+    def filter(self, record: logging.LogRecord) -> bool:
+        return "/health" not in record.getMessage()
+
 # ── Lifespan ─────────────────────────────────────────────────────────────
 
 
@@ -43,6 +48,7 @@ async def lifespan(app: FastAPI):
         level=getattr(logging, settings.LOG_LEVEL.upper(), logging.INFO),
         format="%(asctime)s %(levelname)s %(name)s: %(message)s",
     )
+    logging.getLogger("uvicorn.access").addFilter(_HealthCheckFilter())
     Base.metadata.create_all(get_engine())
     nightly_scheduler.start()
     logger.info("Application started")

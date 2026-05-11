@@ -10,6 +10,7 @@ from uuid import uuid4
 
 from agents.caveman import compress
 from agents.context import AgentContextRepository, ConversationContext
+from agents.data_freshness import assess_data_freshness
 from agents.model_router import get_model_client
 from agents.prompt_builder import build_analysis_prompt
 from agents.schemas import ReadinessReport
@@ -46,12 +47,37 @@ class AnalysisAgent:
         if target_date is None:
             target_date = str(date.today())
 
+        # Step 0 — Data freshness check
+        freshness = assess_data_freshness(self.user_id)
+        logger.info(
+            "data_freshness_check confidence=%s recommendation=%s "
+            "today_sleep=%s today_hrv=%s last_sync_hours_ago=%s",
+            freshness.confidence,
+            freshness.recommendation,
+            freshness.today_sleep_available,
+            freshness.today_hrv_available,
+            freshness.last_sync_hours_ago,
+        )
+
+        if freshness.recommendation == "NO_DATA":
+            raise ValueError(
+                "No wearable data found. Run Garmin sync before analysis. "
+                "POST /api/scheduler/trigger/sync"
+            )
+
+        if freshness.recommendation == "TRIGGER_RESYNC":
+            logger.warning("stale_data_triggering_resync user_id=%s", self.user_id)
+            import asyncio
+            from scheduler import nightly_scheduler
+            asyncio.create_task(nightly_scheduler.run_garmin_sync_today())
+            # Continue with best available data — resync will improve next run
+
         # Step 1 — Load context injection
         ctx = self.ctx_repo.load_latest(self.user_id, "analysis")
         context_injection = ctx.to_system_injection() if ctx else None
 
         # Step 2 — Build prompt
-        pkg = build_analysis_prompt(self.user_id, target_date, context_injection)
+        pkg = build_analysis_prompt(self.user_id, target_date, context_injection, freshness=freshness)
         logger.info(
             "Analysis prompt ready: ~%d tokens, compression=%.1f%%",
             pkg.token_estimate,

@@ -1,8 +1,12 @@
+import logging
 import os
 import pickle
+from datetime import date
 from pathlib import Path
 
 from garminconnect import Garmin, GarminConnectAuthenticationError
+
+logger = logging.getLogger(__name__)
 
 _SESSION_DIR = os.environ.get("GARMIN_SESSION_DIR", "")
 if _SESSION_DIR:
@@ -67,6 +71,23 @@ class GarminClient:
         return self.client.get_max_metrics(date_str)
 
     # ── Combined daily fetch ─────────────────────────────────────────────
+
+    def fetch_today_recovery(self) -> dict:
+        """Fetch today's data and log which recovery signals are available."""
+        today_str = date.today().strftime("%Y-%m-%d")
+        result = self.fetch_day(today_str)
+
+        recovery_signals = ["sleep", "hrv", "body_battery", "stress"]
+        available = [s for s in recovery_signals if result.get(s) is not None]
+        missing = [s for s in recovery_signals if s not in available]
+
+        logger.info(
+            "today_recovery_fetch date=%s available_signals=%s missing_signals=%s",
+            today_str,
+            available,
+            missing,
+        )
+        return result
 
     def fetch_day(self, date_str: str) -> dict:
         result: dict = {"date": date_str}

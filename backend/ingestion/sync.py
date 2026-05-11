@@ -34,7 +34,8 @@ def main() -> None:
         dates = [args.date]
     else:
         today = date.today()
-        dates = [(today - timedelta(days=i)).strftime("%Y-%m-%d") for i in range(1, args.days + 1)]
+        # range(0, N) includes today so re-running always refreshes today's data
+        dates = [(today - timedelta(days=i)).strftime("%Y-%m-%d") for i in range(0, args.days)]
 
     # Connect to Garmin
     client = GarminClient(settings.GARMIN_EMAIL, settings.GARMIN_PASSWORD)

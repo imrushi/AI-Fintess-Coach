@@ -26,7 +26,11 @@ _METRIC_EXCLUDE = {"raw_garmin_json", "_sa_instance_state"}
 
 
 def get_recent_metrics(user_id: str, days: int = 14) -> list[dict]:
-    """Return the last *days* daily-metric rows for *user_id*, oldest-first."""
+    """Return the last *days* daily-metric rows for *user_id*, oldest-first.
+
+    Includes today's row — today's entry contains last night's sleep data
+    which is the primary readiness signal for the current day.
+    """
     cutoff = date.today() - timedelta(days=days)
     with get_session() as s:
         rows = (
@@ -54,7 +58,7 @@ def get_recent_metrics(user_id: str, days: int = 14) -> list[dict]:
 
 
 def get_hrv_baseline(user_id: str, days: int = 28) -> float | None:
-    """Average HRV over the last *days* days.  Returns None if < 3 data points."""
+    """Average HRV over the last *days* days including today.  Returns None if < 3 data points."""
     cutoff = date.today() - timedelta(days=days)
     with get_session() as s:
         rows = (
@@ -72,6 +76,74 @@ def get_hrv_baseline(user_id: str, days: int = 28) -> float | None:
     if len(rows) < 3:
         return None
     return sum(rows) / len(rows)
+
+
+def get_todays_recovery(user_id: str) -> dict:
+    """Return today's recovery signals from daily_metrics.
+
+    Returns a dict with key recovery fields and availability flags.
+    If no row exists for today all metric values are None and data_available=False.
+    """
+    today = date.today()
+    with get_session() as s:
+        row = s.execute(
+            select(DailyMetric).where(
+                DailyMetric.user_id == user_id,
+                DailyMetric.date == today,
+            )
+        ).scalar_one_or_none()
+
+        if row is None:
+            return {
+                "date": str(today),
+                "sleep_score": None,
+                "sleep_duration_min": None,
+                "deep_sleep_min": None,
+                "rem_sleep_min": None,
+                "hrv_last_night_ms": None,
+                "body_battery_min": None,
+                "body_battery_max": None,
+                "stress_avg": None,
+                "data_available": False,
+                "sleep_available": False,
+                "hrv_available": False,
+            }
+
+        # Read all fields inside the session to avoid DetachedInstanceError
+        sleep_score = row.sleep_score
+        sleep_duration_min = row.sleep_duration_min
+        deep_sleep_min = row.deep_sleep_min
+        rem_sleep_min = row.rem_sleep_min
+        hrv_last_night_ms = row.hrv_last_night_ms
+        body_battery_min = row.body_battery_min
+        body_battery_max = row.body_battery_max
+        stress_avg = row.stress_avg
+        row_date = row.date
+
+    sleep_available = sleep_score is not None
+    hrv_available = hrv_last_night_ms is not None
+    data_available = any([
+        sleep_available,
+        hrv_available,
+        body_battery_min is not None,
+        body_battery_max is not None,
+        stress_avg is not None,
+    ])
+
+    return {
+        "date": str(row_date),
+        "sleep_score": sleep_score,
+        "sleep_duration_min": sleep_duration_min,
+        "deep_sleep_min": deep_sleep_min,
+        "rem_sleep_min": rem_sleep_min,
+        "hrv_last_night_ms": hrv_last_night_ms,
+        "body_battery_min": body_battery_min,
+        "body_battery_max": body_battery_max,
+        "stress_avg": stress_avg,
+        "data_available": data_available,
+        "sleep_available": sleep_available,
+        "hrv_available": hrv_available,
+    }
 
 
 def get_recent_workouts(user_id: str, days: int = 7) -> list[dict]:
