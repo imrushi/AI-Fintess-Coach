@@ -93,6 +93,7 @@ def _profile_to_dict(p: UserProfile) -> dict:
         "current_swim_km_week": p.current_swim_km_week,
         "current_bike_km_week": p.current_bike_km_week,
         "current_run_km_week": p.current_run_km_week,
+        "swim_max_session_min": p.swim_max_session_min,
         "model_analysis": p.model_analysis,
         "model_planning": p.model_planning,
         "updated_at": p.updated_at.isoformat() if p.updated_at else None,
@@ -120,6 +121,7 @@ class UpdateProfileRequest(BaseModel):
     current_swim_km_week: float | None = None
     current_bike_km_week: float | None = None
     current_run_km_week: float | None = None
+    swim_max_session_min: int | None = None    # hard cap on pool time (minutes)
     model_analysis: str | None = None
     model_planning: str | None = None
 
@@ -183,6 +185,7 @@ class ModelConfigRequest(BaseModel):
 class RunPipelineRequest(BaseModel):
     user_id: str
     override_choice: str | None = None
+    patch_target: str = "tomorrow"  # "today" or "tomorrow"
 
 
 class RunPipelineResponse(BaseModel):
@@ -193,6 +196,20 @@ class RunPipelineResponse(BaseModel):
     plan_valid_to: str | None = None
     session_count: int | None = None
     total_tokens_used: int | None = None
+    error: str | None = None
+
+
+class PatchTodayRequest(BaseModel):
+    user_id: str
+    intensity_preference: str | None = None  # "easy", "moderate", "hard", "as_planned", "rest"
+
+
+class PatchTodayResponse(BaseModel):
+    success: bool
+    session: dict | None = None
+    readiness_score: int | None = None
+    training_gate: str | None = None
+    tokens_used: int | None = None
     error: str | None = None
 
 
@@ -231,6 +248,18 @@ def login(body: LoginRequest):
 @app.get("/api/scheduler/status")
 def scheduler_status():
     return nightly_scheduler.get_status()
+
+
+@app.post("/api/scheduler/pause")
+def scheduler_pause():
+    nightly_scheduler.scheduler.pause()
+    return {"paused": True}
+
+
+@app.post("/api/scheduler/resume")
+def scheduler_resume():
+    nightly_scheduler.scheduler.resume()
+    return {"paused": False}
 
 
 class SchedulerTriggerRequest(BaseModel):
@@ -393,7 +422,7 @@ async def get_analysis_history(
 
 @app.post("/api/pipeline/run")
 async def run_pipeline(body: RunPipelineRequest):
-    result = await orchestrator.run_full_pipeline(body.user_id, body.override_choice)
+    result = await orchestrator.run_full_pipeline(body.user_id, body.override_choice, body.patch_target)
     if not result.success or result.analysis_result is None:
         return RunPipelineResponse(
             success=False,
@@ -414,6 +443,135 @@ async def run_pipeline(body: RunPipelineRequest):
         resp.session_count = len(pr.plan.sessions)
     resp.total_tokens_used = total_tokens
     return resp
+
+
+@app.post("/api/plans/patch-today")
+async def patch_today_session(body: PatchTodayRequest):
+    """Re-generate only today's session in the current plan.
+
+    Uses the most recent readiness report (must already exist).
+    Optional intensity_preference overrides the LLM's default choice.
+    """
+    import json as _json
+
+    # 1 — Load today's readiness report
+    today = date.today()
+    with get_session() as s:
+        rr_row = s.execute(
+            select(ReadinessReportRow)
+            .where(
+                ReadinessReportRow.user_id == body.user_id,
+                ReadinessReportRow.report_date == today,
+            )
+        ).scalar_one_or_none()
+        if rr_row is None:
+            # Fall back to most recent report
+            rr_row = s.execute(
+                select(ReadinessReportRow)
+                .where(ReadinessReportRow.user_id == body.user_id)
+                .order_by(ReadinessReportRow.report_date.desc())
+                .limit(1)
+            ).scalar_one_or_none()
+        if rr_row is None:
+            return PatchTodayResponse(
+                success=False,
+                error="No readiness report found. Run pipeline first.",
+            )
+        report_json = rr_row.report_json
+        readiness_score = rr_row.readiness_score
+        training_gate = rr_row.training_gate
+
+    # 2 — Load current plan
+    with get_session() as s:
+        plan_row = s.execute(
+            select(TrainingPlanRow)
+            .where(
+                TrainingPlanRow.user_id == body.user_id,
+                TrainingPlanRow.is_current == True,  # noqa: E712
+            )
+        ).scalar_one_or_none()
+        if plan_row is None:
+            return PatchTodayResponse(
+                success=False,
+                error="No active training plan. Run pipeline first.",
+            )
+        plan_id = plan_row.id
+        plan_json_str = plan_row.plan_json
+
+    # 3 — Build patch prompt targeting TODAY
+    from agents.plan_prompt_builder import build_today_patch_prompt
+    from agents.schemas import ReadinessReport as RRSchema
+    from agents.model_router import get_model_client
+    from db.reader import get_user_profile
+
+    profile = get_user_profile(body.user_id) or {}
+    model_str = profile.get("model_planning", "openrouter/anthropic/claude-sonnet-4.6")
+
+    report = RRSchema.model_validate(_json.loads(report_json))
+    plan_dict = _json.loads(plan_json_str)
+
+    pkg = build_today_patch_prompt(
+        body.user_id, report, plan_dict, body.intensity_preference
+    )
+
+    # 4 — Call LLM
+    client = get_model_client(model_str)
+    messages = [{"role": "user", "content": pkg.compressed_user_prompt}]
+    session_dict: dict | None = None
+
+    for attempt in range(1, 4):
+        response = await client.complete(
+            messages=messages, system=pkg.system_prompt, json_mode=True
+        )
+        try:
+            raw = _json.loads(response.content)
+            # Validate as TrainingSession
+            from agents.plan_schemas import TrainingSession as TSSchema
+            today_str = str(today)
+            raw["date"] = today_str
+            if "day_of_week" not in raw:
+                import calendar
+                raw["day_of_week"] = calendar.day_name[today.weekday()]
+            ts = TSSchema.model_validate(raw)
+            session_dict = ts.model_dump()
+            break
+        except Exception as e:
+            if attempt == 3:
+                return PatchTodayResponse(success=False, error=f"LLM parse failed: {e}")
+            messages.append({"role": "assistant", "content": response.content})
+            messages.append({"role": "user", "content": f"Invalid JSON or schema error: {e}. Output ONLY the session JSON."})
+
+    if session_dict is None:
+        return PatchTodayResponse(success=False, error="Failed to generate session")
+
+    # 5 — Write updated session back to plan in DB
+    today_str = str(today)
+    sessions = plan_dict.get("sessions", [])
+    replaced = False
+    for i, s in enumerate(sessions):
+        if s.get("date") == today_str:
+            sessions[i] = session_dict
+            replaced = True
+            break
+    if not replaced:
+        sessions.append(session_dict)
+
+    plan_dict["sessions"] = sessions
+    with get_session() as s:
+        plan_row = s.get(TrainingPlanRow, plan_id)
+        if plan_row:
+            plan_row.plan_json = _json.dumps(plan_dict)
+
+    from db.cost_logger import log_agent_run
+    log_agent_run(body.user_id, "patch_today", response)
+
+    return PatchTodayResponse(
+        success=True,
+        session=session_dict,
+        readiness_score=readiness_score,
+        training_gate=training_gate,
+        tokens_used=response.prompt_tokens + response.completion_tokens,
+    )
 
 
 # ── Plan Endpoints ────────────────────────────────────────────────────────

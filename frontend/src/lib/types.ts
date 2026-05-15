@@ -278,6 +278,7 @@ export interface GoalProgress {
 
 export interface SchedulerStatus {
   is_running: boolean
+  is_paused: boolean
   jobs: Array<{
     id: string
     next_run: string | null

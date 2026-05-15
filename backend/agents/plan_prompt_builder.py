@@ -10,7 +10,7 @@ from datetime import date, timedelta
 from agents.caveman import compress
 from agents.schemas import ReadinessReport
 from db.model import TrainingPlanRow, get_session
-from db.reader import compute_hr_zones, get_recent_workouts, get_user_profile, get_weeks_to_goal
+from db.reader import compute_hr_zones, get_recent_feedback, get_recent_workouts, get_user_profile, get_weeks_to_goal
 
 from sqlalchemy import select
 
@@ -162,6 +162,9 @@ def build_planning_prompt(
     current_swim_km = profile.get("current_swim_km_week")
     current_bike_km = profile.get("current_bike_km_week")
     current_run_km = profile.get("current_run_km_week")
+    swim_max_min = profile.get("swim_max_session_min")
+
+    _swim_per_session_m = int(current_swim_km * 1000 / 2) if current_swim_km else None
 
     sections: list[str] = []
 
@@ -179,6 +182,14 @@ def build_planning_prompt(
         f"Swim equipment available: {swim_equipment}\n"
         f"Swim stroke proficiency: {swim_strokes}\n"
         f"Current weekly volume — Swim: {_vol(current_swim_km)} | Bike: {_vol(current_bike_km)} | Run: {_vol(current_run_km)}\n"
+        + (
+            f"Swim per-session baseline: {_swim_per_session_m}m "
+            f"(= {_vol(current_swim_km)}/week ÷ 2 sessions). "
+            f"NEVER prescribe below {_swim_per_session_m}m for a standard swim session. "
+            f"Hard intensity target: ≥{int(_swim_per_session_m * 1.1)}m.\n"
+            if _swim_per_session_m else ""
+        ) +
+        (f"Swim pool time cap: {swim_max_min} min — do NOT exceed this total session duration.\n" if swim_max_min else "") +
         f"IMPORTANT: For any discipline marked N/A, do NOT prescribe sessions of that type."
     )
 
@@ -249,6 +260,14 @@ def build_planning_prompt(
     sections.append(
         f"## Previous Plan Summary\n{prev or 'No previous plan — start fresh.'}"
     )
+
+    # Section 5b — Recent athlete feedback
+    recent_feedback = get_recent_feedback(user_id, days=7)
+    if recent_feedback:
+        sections.append(
+            f"## Athlete Feedback (7d)\n"
+            + json.dumps(recent_feedback, separators=(",", ":"), default=str)
+        )
 
     # Section 6 — Plan request
     sections.append(
@@ -361,6 +380,9 @@ def build_daily_patch_prompt(
     current_swim_km = profile.get("current_swim_km_week")
     current_bike_km = profile.get("current_bike_km_week")
     current_run_km = profile.get("current_run_km_week")
+    swim_max_min = profile.get("swim_max_session_min")
+
+    _swim_per_session_m = int(current_swim_km * 1000 / 2) if current_swim_km else None
 
     sections: list[str] = []
 
@@ -372,6 +394,14 @@ def build_daily_patch_prompt(
         f"Swim equipment: {swim_equipment}\n"
         f"Swim strokes: {swim_strokes}\n"
         f"Current weekly volume — Swim: {_vol(current_swim_km)} | Bike: {_vol(current_bike_km)} | Run: {_vol(current_run_km)}\n"
+        + (
+            f"Swim per-session baseline: {_swim_per_session_m}m "
+            f"(= {_vol(current_swim_km)}/week ÷ 2 sessions). "
+            f"NEVER prescribe below {_swim_per_session_m}m for a standard swim session. "
+            f"Hard intensity target: ≥{int(_swim_per_session_m * 1.1)}m.\n"
+            if _swim_per_session_m else ""
+        ) +
+        (f"Swim pool time cap: {swim_max_min} min — do NOT exceed this total session duration.\n" if swim_max_min else "") +
         f"IMPORTANT: For any discipline marked N/A, do NOT prescribe sessions of that type."
     )
 
@@ -406,6 +436,14 @@ def build_daily_patch_prompt(
             f"## No session was planned for tomorrow — create an appropriate one."
         )
 
+    # Recent athlete feedback
+    recent_feedback = get_recent_feedback(user_id, days=7)
+    if recent_feedback:
+        sections.append(
+            f"## Athlete Feedback (7d)\n"
+            + json.dumps(recent_feedback, separators=(",", ":"), default=str)
+        )
+
     # Task
     sections.append(
         f"## Task\n"
@@ -428,6 +466,118 @@ def build_daily_patch_prompt(
         compression_ratio=round(ratio, 3),
         token_estimate=token_estimate,
         tomorrow=tomorrow_str,
+    )
+
+
+def build_today_patch_prompt(
+    user_id: str,
+    readiness_report: ReadinessReport,
+    current_plan_json: dict,
+    intensity_preference: str | None = None,
+) -> PatchPromptPackage:
+    """Build a prompt to re-generate only TODAY's session.
+
+    intensity_preference: 'easy' | 'moderate' | 'hard' | 'as_planned' | 'rest' | None
+    """
+    import calendar
+    from db.reader import compute_hr_zones, get_user_profile
+
+    profile = get_user_profile(user_id) or {}
+    hr_zones = compute_hr_zones(user_id)
+
+    today = date.today()
+    today_str = str(today)
+    today_dow = calendar.day_name[today.weekday()]
+
+    existing_session = next(
+        (s for s in current_plan_json.get("sessions", []) if s.get("date") == today_str),
+        None,
+    )
+
+    goal_event = profile.get("goal_event", "not set")
+    medical = profile.get("medical_conditions", "none")
+    current_swim_km = profile.get("current_swim_km_week")
+    current_bike_km = profile.get("current_bike_km_week")
+    current_run_km = profile.get("current_run_km_week")
+    swim_max_min = profile.get("swim_max_session_min")
+
+    _swim_per_session_m = int(current_swim_km * 1000 / 2) if current_swim_km else None
+
+    sections: list[str] = []
+
+    sections.append(
+        f"## Athlete\n"
+        f"Goal: {goal_event}\n"
+        f"Medical: {medical}\n"
+        f"Current weekly volume — Swim: {_vol(current_swim_km)} | Bike: {_vol(current_bike_km)} | Run: {_vol(current_run_km)}\n"
+        + (
+            f"Swim per-session baseline: {_swim_per_session_m}m "
+            f"(= {_vol(current_swim_km)}/week ÷ 2 sessions). "
+            f"NEVER prescribe below {_swim_per_session_m}m for a standard swim session. "
+            f"Hard intensity target: ≥{int(_swim_per_session_m * 1.1)}m.\n"
+            if _swim_per_session_m else ""
+        ) +
+        (f"Swim pool time cap: {swim_max_min} min — do NOT exceed this total session duration.\n" if swim_max_min else "") +
+        f"IMPORTANT: For any discipline marked N/A, do NOT prescribe sessions of that type."
+    )
+
+    r = readiness_report
+    sections.append(
+        f"## Today's Readiness ({today_str}, {today_dow})\n"
+        f"Score: {r.readiness_score}/100 | Gate: {r.training_gate.value}\n"
+        f"Flags: {', '.join(r.flags) or 'none'}\n"
+        f"Narrative: {r.narrative}"
+    )
+
+    if hr_zones:
+        zone_lines = "\n".join(f"{z}: {bpm}" for z, bpm in hr_zones["zones"].items())
+        sections.append(f"## HR Zones ({hr_zones['method']})\n{zone_lines}")
+
+    if intensity_preference:
+        intensity_map = {
+            "easy": "Scale intensity DOWN — keep in Z1/Z2, reduce duration by 20-30%.",
+            "moderate": "Keep planned intensity — adjust for readiness gate if needed.",
+            "hard": "Scale intensity UP — push to Z3/Z4 where appropriate. Only if gate allows.",
+            "as_planned": "Keep session exactly as originally planned. Do not adjust.",
+            "rest": "Replace with active recovery or rest day regardless of gate.",
+        }
+        instr = intensity_map.get(intensity_preference, f"User preference: {intensity_preference}")
+        sections.append(f"## User Intensity Preference\n{instr}")
+
+    if existing_session:
+        sections.append(
+            f"## Current Today's Session (to be updated)\n"
+            + json.dumps(existing_session, separators=(",", ":"))
+        )
+    else:
+        sections.append("## Current Today's Session\nNo session currently planned for today.")
+
+    # Recent athlete feedback
+    recent_feedback = get_recent_feedback(user_id, days=7)
+    if recent_feedback:
+        sections.append(
+            f"## Athlete Feedback (7d)\n"
+            + json.dumps(recent_feedback, separators=(",", ":"), default=str)
+        )
+
+    sections.append(
+        f"## Task\n"
+        f"Generate an updated session for TODAY ({today_str}, {today_dow}).\n"
+        f"Apply the readiness gate and user intensity preference.\n"
+        f"Output ONLY the single session JSON object."
+    )
+
+    user_prompt = "\n\n".join(sections)
+    compressed, ratio = compress(user_prompt)
+    token_estimate = (len(PATCH_SYSTEM_PROMPT) + len(compressed)) // 4
+
+    return PatchPromptPackage(
+        system_prompt=PATCH_SYSTEM_PROMPT,
+        user_prompt=user_prompt,
+        compressed_user_prompt=compressed,
+        compression_ratio=round(ratio, 3),
+        token_estimate=token_estimate,
+        tomorrow=today_str,  # reusing field — indicates the target date
     )
 
 

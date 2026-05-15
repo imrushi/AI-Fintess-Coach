@@ -11,7 +11,7 @@ from uuid import uuid4
 from agents.caveman import compress
 from agents.context import AgentContextRepository, ConversationContext
 from agents.model_router import get_model_client
-from agents.plan_prompt_builder import build_daily_patch_prompt, build_planning_prompt
+from agents.plan_prompt_builder import build_daily_patch_prompt, build_planning_prompt, build_today_patch_prompt
 from agents.plan_schemas import TrainingPlan, TrainingSession
 from agents.schemas import ReadinessReport, TrainingGate, TrainingGate
 from config import settings
@@ -189,25 +189,34 @@ class PlanningAgent:
         readiness_report: ReadinessReport,
         current_plan_json: str,
         override_choice: str | None = None,
+        patch_target: str = "tomorrow",
     ) -> PlanningResult:
-        """Update only tomorrow's session in the existing plan. Much cheaper than a full run."""
+        """Update only one session in the existing plan. Much cheaper than a full run.
+
+        patch_target: "tomorrow" (default, used by scheduler) or "today" (manual frontend trigger).
+        """
         current_plan_dict = json.loads(current_plan_json)
 
-        # Pre-check: if gate == PROCEED with no override and tomorrow already has a session,
+        target_date_str = (
+            str(date.today()) if patch_target == "today"
+            else str(date.today() + timedelta(days=1))
+        )
+
+        # Pre-check: if gate == PROCEED with no override and target session already exists,
         # the plan is fine as-is — skip LLM entirely (zero token cost).
-        tomorrow_str_pre = str(date.today() + timedelta(days=1))
-        existing_tomorrow = next(
-            (s for s in current_plan_dict.get("sessions", []) if s.get("date") == tomorrow_str_pre),
+        existing_target = next(
+            (s for s in current_plan_dict.get("sessions", []) if s.get("date") == target_date_str),
             None,
         )
         if (
             readiness_report.training_gate == TrainingGate.PROCEED
             and override_choice is None
-            and existing_tomorrow is not None
+            and existing_target is not None
+            and patch_target == "tomorrow"  # always re-patch today when explicitly requested
         ):
             logger.info(
-                "Patch skipped for %s — gate=PROCEED, no override, tomorrow session exists (%s). Zero tokens used.",
-                self.user_id, tomorrow_str_pre,
+                "Patch skipped for %s — gate=PROCEED, no override, %s session exists (%s). Zero tokens used.",
+                self.user_id, patch_target, target_date_str,
             )
             existing_plan = TrainingPlan.model_validate(current_plan_dict)
             return PlanningResult(
@@ -222,12 +231,17 @@ class PlanningAgent:
                 no_change=True,
             )
 
-        # Step 1 — Build patch prompt
-        pkg = build_daily_patch_prompt(
-            self.user_id, readiness_report, current_plan_dict, override_choice
-        )
+        # Step 1 — Build patch prompt (today vs tomorrow)
+        if patch_target == "today":
+            pkg = build_today_patch_prompt(
+                self.user_id, readiness_report, current_plan_dict, override_choice
+            )
+        else:
+            pkg = build_daily_patch_prompt(
+                self.user_id, readiness_report, current_plan_dict, override_choice
+            )
         logger.info(
-            "Patch prompt ready: ~%d tokens (vs full plan ~400+)", pkg.token_estimate
+            "Patch prompt ready (%s): ~%d tokens (vs full plan ~400+)", patch_target, pkg.token_estimate
         )
 
         # Step 2 — Call model
@@ -287,10 +301,10 @@ class PlanningAgent:
 
         # Step 3 — Splice updated session into existing plan
         sessions = current_plan_dict.get("sessions", [])
-        tomorrow_str = pkg.tomorrow
+        target_str = target_date_str
         updated = False
         for i, s in enumerate(sessions):
-            if s.get("date") == tomorrow_str:
+            if s.get("date") == target_str:
                 sessions[i] = session_dict
                 updated = True
                 break
@@ -347,7 +361,7 @@ class PlanningAgent:
 
         logger.info(
             "Patch complete for %s: updated session %s, tokens_in=%d tokens_out=%d",
-            self.user_id, tomorrow_str, response.prompt_tokens, response.completion_tokens,
+            self.user_id, target_date_str, response.prompt_tokens, response.completion_tokens,
         )
 
         return PlanningResult(

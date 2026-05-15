@@ -28,16 +28,20 @@
     Zap,
     TrendingUp,
     Calendar,
+    Activity,
   } from "lucide-svelte";
   import {
     runFullPipeline,
+    patchTomorrowSession,
     getCurrentPlan,
     getReadinessReport,
     submitCheckIn,
     triggerSync,
     getKpiMetrics,
+    patchTodaySession,
   } from "$lib/api";
   import OverrideModal from "$lib/components/OverrideModal.svelte";
+  import PatchTodayModal from "$lib/components/PatchTodayModal.svelte";
   import { onMount } from "svelte";
 
   // ── Getting-started state ──────────────────────────────────────
@@ -184,6 +188,52 @@
       addToast(e instanceof Error ? e.message : "Pipeline failed", "error");
     } finally {
       pipelineRunning.set(false);
+    }
+  }
+
+  // ── Patch today trigger ───────────────────────────────────────────────
+  let showPatchTodayModal = $state(false);
+  let patchTodayLoading = $state(false);
+
+  async function handlePatchToday(intensity: string) {
+    if (!$userId) return;
+    patchTodayLoading = true;
+    try {
+      const result = await patchTodaySession($userId, intensity);
+      if (!result.success) {
+        addToast(result.error ?? "Update failed", "error");
+        return;
+      }
+      showPatchTodayModal = false;
+      addToast("Today's session updated!", "success");
+      const plan = await getCurrentPlan($userId);
+      currentPlan.set(plan);
+    } catch (e: unknown) {
+      addToast(e instanceof Error ? e.message : "Update failed", "error");
+    } finally {
+      patchTodayLoading = false;
+    }
+  }
+
+  // ── Patch tomorrow trigger ────────────────────────────────────────────
+  let patchTomorrowLoading = $state(false);
+
+  async function handlePatchTomorrow() {
+    if (!$userId || patchTomorrowLoading) return;
+    patchTomorrowLoading = true;
+    try {
+      const result = await patchTomorrowSession($userId);
+      if (!result.success) {
+        addToast(result.error ?? "Update failed", "error");
+        return;
+      }
+      addToast("Tomorrow's session updated!", "success");
+      const plan = await getCurrentPlan($userId);
+      currentPlan.set(plan);
+    } catch (e: unknown) {
+      addToast(e instanceof Error ? e.message : "Update failed", "error");
+    } finally {
+      patchTomorrowLoading = false;
     }
   }
 
@@ -740,9 +790,39 @@
               {$currentPlan.valid_from} → {$currentPlan.valid_to}
             </span>
           </div>
-          <span class="text-xs text-slate-400"
-            >{timeAgo($currentPlan.generated_at)}</span
-          >
+          <div class="flex items-center gap-2">
+            <span class="text-xs text-slate-400"
+              >{timeAgo($currentPlan.generated_at)}</span
+            >
+            <button
+              onclick={() => (showPatchTodayModal = true)}
+              disabled={patchTodayLoading}
+              class="flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium
+                     bg-indigo-600/20 hover:bg-indigo-600/40 border border-indigo-500/40
+                     text-indigo-300 rounded-lg transition disabled:opacity-50"
+              title="Re-generate today's session with your chosen intensity"
+            >
+              <Activity size={12} />
+              Update Today
+            </button>
+            <button
+              onclick={handlePatchTomorrow}
+              disabled={patchTomorrowLoading}
+              class="flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium
+                     bg-violet-600/20 hover:bg-violet-600/40 border border-violet-500/40
+                     text-violet-300 rounded-lg transition disabled:opacity-50"
+              title="Re-generate tomorrow's session based on today's readiness"
+            >
+              {#if patchTomorrowLoading}
+                <span
+                  class="w-3 h-3 border-2 border-violet-400/40 border-t-violet-300 rounded-full animate-spin"
+                ></span>
+              {:else}
+                <Activity size={12} />
+              {/if}
+              Update Tomorrow
+            </button>
+          </div>
         </div>
 
         <!-- Week 1 -->
@@ -1278,6 +1358,14 @@
     ondismiss={() => showOverrideModal.set(false)}
   />
 {/if}
+
+<PatchTodayModal
+  report={$todayReport}
+  open={showPatchTodayModal}
+  loading={patchTodayLoading}
+  onsubmit={handlePatchToday}
+  ondismiss={() => (showPatchTodayModal = false)}
+/>
 
 <style>
   @keyframes fade-in {

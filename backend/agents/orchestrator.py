@@ -150,7 +150,7 @@ class AgentOrchestrator:
         return result
 
     async def run_full_pipeline(
-        self, user_id: str, override_choice: str | None = None
+        self, user_id: str, override_choice: str | None = None, patch_target: str = "tomorrow"
     ) -> PipelineResult:
         result = await self.run_analysis(user_id)
         if not result.success:
@@ -159,7 +159,7 @@ class AgentOrchestrator:
         report = result.analysis_result.report
 
         # Check for an existing current plan —
-        # if one exists, only patch tomorrow's session (token-efficient).
+        # if one exists, only patch one session (token-efficient).
         # If none exists, generate a fresh 7-day plan.
         import json as _json
         existing_plan_json: str | None = None
@@ -175,10 +175,10 @@ class AgentOrchestrator:
 
         if existing_plan_json is not None:
             logger.info(
-                "Existing plan found for %s — running daily patch (tomorrow only)", user_id
+                "Existing plan found for %s — running daily patch (%s)", user_id, patch_target
             )
             planning = await self.run_planning_patch(
-                user_id, report, existing_plan_json, override_choice
+                user_id, report, existing_plan_json, override_choice, patch_target
             )
         else:
             logger.info("No existing plan for %s — generating full 7-day plan", user_id)
@@ -195,6 +195,7 @@ class AgentOrchestrator:
         readiness_report: ReadinessReport,
         current_plan_json: str,
         override_choice: str | None = None,
+        patch_target: str = "tomorrow",
     ) -> PipelineResult:
         run_date = str(date.today())
         result = PipelineResult(user_id=user_id, run_date=run_date)
@@ -218,7 +219,7 @@ class AgentOrchestrator:
 
         try:
             agent = PlanningAgent(user_id=user_id, model_str=model_str)
-            planning = await agent.run_patch(readiness_report, current_plan_json, override_choice)
+            planning = await agent.run_patch(readiness_report, current_plan_json, override_choice, patch_target)
             result.planning_result = planning
             result.success = True
 

@@ -145,10 +145,39 @@ export async function getCheckIn(userId: string, checkDate: string): Promise<Che
 
 // ── Pipeline ──────────────────────────────────────────────────────────────
 
-export async function runFullPipeline(userId: string, overrideChoice?: string): Promise<PipelineRunResult> {
+export async function runFullPipeline(userId: string, overrideChoice?: string, patchTarget: 'today' | 'tomorrow' = 'today'): Promise<PipelineRunResult> {
   return apiFetch('/pipeline/run', {
     method: 'POST',
-    body: JSON.stringify({ user_id: userId, override_choice: overrideChoice ?? null }),
+    body: JSON.stringify({ user_id: userId, override_choice: overrideChoice ?? null, patch_target: patchTarget }),
+  })
+}
+
+export async function patchTomorrowSession(userId: string): Promise<PipelineRunResult> {
+  return apiFetch('/pipeline/run', {
+    method: 'POST',
+    body: JSON.stringify({ user_id: userId, override_choice: null, patch_target: 'tomorrow' }),
+  })
+}
+
+export interface PatchTodayResult {
+  success: boolean
+  session: TrainingSession | null
+  readiness_score: number | null
+  training_gate: string | null
+  tokens_used: number | null
+  error: string | null
+}
+
+export async function patchTodaySession(
+  userId: string,
+  intensityPreference?: string,
+): Promise<PatchTodayResult> {
+  return apiFetch('/plans/patch-today', {
+    method: 'POST',
+    body: JSON.stringify({
+      user_id: userId,
+      intensity_preference: intensityPreference ?? null,
+    }),
   })
 }
 
@@ -179,6 +208,14 @@ export async function getGoalProgress(userId: string): Promise<GoalProgress> {
 
 export async function getSchedulerStatus(): Promise<SchedulerStatus> {
   return apiFetch('/scheduler/status')
+}
+
+export async function pauseScheduler(): Promise<{ paused: boolean }> {
+  return apiFetch('/scheduler/pause', { method: 'POST' })
+}
+
+export async function resumeScheduler(): Promise<{ paused: boolean }> {
+  return apiFetch('/scheduler/resume', { method: 'POST' })
 }
 
 export async function triggerSync(userId: string): Promise<{ triggered: boolean; message: string }> {

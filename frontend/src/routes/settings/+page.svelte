@@ -11,6 +11,8 @@
     getProfile,
     updateProfile,
     getSchedulerStatus,
+    pauseScheduler,
+    resumeScheduler,
     triggerSync,
     triggerPipeline,
     clearCurrentPlan,
@@ -72,6 +74,7 @@
     current_swim_km_week: "",
     current_bike_km_week: "",
     current_run_km_week: "",
+    swim_max_session_min: "",
     garmin_email: "",
     garmin_password: "",
     swim_equipment: "",
@@ -154,6 +157,8 @@
           p.current_bike_km_week != null ? String(p.current_bike_km_week) : "",
         current_run_km_week:
           p.current_run_km_week != null ? String(p.current_run_km_week) : "",
+        swim_max_session_min:
+          p.swim_max_session_min != null ? String(p.swim_max_session_min) : "",
         garmin_email: p.garmin_email ?? "",
         garmin_password: "",
         swim_equipment: p.swim_equipment ?? "",
@@ -211,6 +216,9 @@
         current_run_km_week: form.current_run_km_week
           ? parseFloat(form.current_run_km_week)
           : null,
+        swim_max_session_min: form.swim_max_session_min
+          ? parseInt(form.swim_max_session_min)
+          : null,
         model_analysis: form.model_analysis,
         model_planning: form.model_planning,
       });
@@ -235,6 +243,27 @@
   }
 
   // ── Sync / pipeline triggers ──────────────────────────────────────────
+  let schedulerToggling = $state(false);
+
+  async function handleToggleScheduler() {
+    if (!schedulerStatus) return;
+    schedulerToggling = true;
+    try {
+      if (schedulerStatus.is_paused) {
+        await resumeScheduler();
+        showToast("Scheduler resumed — jobs will run as scheduled");
+      } else {
+        await pauseScheduler();
+        showToast("Scheduler paused — automatic jobs won't run until resumed");
+      }
+      schedulerStatus = await getSchedulerStatus();
+    } catch {
+      showToast("Failed to toggle scheduler", "error");
+    } finally {
+      schedulerToggling = false;
+    }
+  }
+
   async function handleSyncNow() {
     if (!$userId) return;
     syncTriggering = true;
@@ -584,6 +613,33 @@
                 </div>
               </div>
             </div>
+
+            <!-- Swim pool time cap -->
+            <div class="col-span-2 space-y-2">
+              <p class="label-sm">Max Pool Session Duration</p>
+              <p class="text-xs text-slate-500">
+                Hard cap on how long you can spend in the pool (e.g. lane
+                availability). The AI will never schedule a swim session longer
+                than this.
+              </p>
+              <div class="w-40">
+                <div class="space-y-1">
+                  <label for="swim-max-min" class="label-sm text-blue-400"
+                    >Max minutes in pool</label
+                  >
+                  <input
+                    id="swim-max-min"
+                    type="number"
+                    bind:value={form.swim_max_session_min}
+                    min="15"
+                    max="180"
+                    step="5"
+                    placeholder="e.g. 45"
+                    class="input-field"
+                  />
+                </div>
+              </div>
+            </div>
           </div>
 
           <!-- Fitness Level segmented control -->
@@ -906,21 +962,31 @@
         <div class="bg-slate-700/50 rounded-lg p-4 space-y-3">
           <div class="flex items-center justify-between">
             <p class="text-sm font-medium text-slate-200">Nightly Scheduler</p>
-            {#if schedulerStatus?.is_running}
-              <span
-                class="inline-flex items-center gap-1.5 text-xs font-medium text-green-400 bg-green-900/30 border border-green-800/50 px-2 py-0.5 rounded-full"
-              >
-                <span class="w-1.5 h-1.5 rounded-full bg-green-400"
-                ></span>Active
-              </span>
-            {:else}
-              <span
-                class="inline-flex items-center gap-1.5 text-xs font-medium text-red-400 bg-red-900/30 border border-red-800/50 px-2 py-0.5 rounded-full"
-              >
-                <span class="w-1.5 h-1.5 rounded-full bg-red-400"
-                ></span>Inactive
-              </span>
-            {/if}
+            <button
+              onclick={handleToggleScheduler}
+              disabled={schedulerToggling || !schedulerStatus?.is_running}
+              class="flex items-center gap-1.5 text-xs font-medium px-3 py-1 rounded-full border transition disabled:opacity-50
+                {schedulerStatus?.is_paused
+                ? 'text-yellow-400 bg-yellow-900/30 border-yellow-800/50 hover:bg-yellow-900/50'
+                : 'text-green-400 bg-green-900/30 border-green-800/50 hover:bg-green-900/50'}"
+            >
+              {#if schedulerToggling}
+                <span
+                  class="w-2 h-2 rounded-full border border-current border-t-transparent animate-spin"
+                ></span>
+              {:else}
+                <span
+                  class="w-1.5 h-1.5 rounded-full {schedulerStatus?.is_paused
+                    ? 'bg-yellow-400'
+                    : 'bg-green-400'}"
+                ></span>
+              {/if}
+              {schedulerStatus?.is_paused
+                ? "Paused — click to resume"
+                : schedulerStatus?.is_running
+                  ? "Active — click to pause"
+                  : "Inactive"}
+            </button>
           </div>
           {#if schedulerStatus?.jobs}
             <div class="space-y-1.5 text-xs text-slate-400">

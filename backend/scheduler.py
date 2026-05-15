@@ -145,7 +145,7 @@ class NightlyScheduler:
 
         for user_id in user_ids:
             try:
-                result = await orchestrator.run_full_pipeline(user_id)
+                result = await orchestrator.run_full_pipeline(user_id, patch_target="today")
                 if result.success:
                     score = result.analysis_result.report.readiness_score
                     logger.info("Pipeline complete for %s: score=%s", user_id, score)
@@ -168,6 +168,7 @@ class NightlyScheduler:
     def get_status(self) -> dict:
         return {
             "is_running": self.is_running,
+            "is_paused": self.scheduler.state == 2,  # STATE_PAUSED = 2
             "jobs": [
                 {
                     "id": job.id,
@@ -212,7 +213,7 @@ class NightlyScheduler:
     async def pipeline_single_user(self, user_id: str) -> None:
         logger.info("Manual pipeline triggered for user %s", user_id)
         try:
-            result = await orchestrator.run_full_pipeline(user_id)
+            result = await orchestrator.run_full_pipeline(user_id, patch_target="today")
             if result.success:
                 score = result.analysis_result.report.readiness_score
                 logger.info("Pipeline complete for %s: score=%s", user_id, score)

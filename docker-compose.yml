@@ -12,6 +12,7 @@ services:
     environment:
       DATABASE_URL: sqlite:////data/fitness.db
       GARMIN_SESSION_DIR: /data
+      TZ: "Asia/Kolkata"
     restart: unless-stopped
     healthcheck:
       test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8000/health')"]

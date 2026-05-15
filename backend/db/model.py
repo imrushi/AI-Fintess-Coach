@@ -78,6 +78,7 @@ class UserProfile(Base):
     current_swim_km_week: Mapped[float | None] = mapped_column(Float, nullable=True)
     current_bike_km_week: Mapped[float | None] = mapped_column(Float, nullable=True)
     current_run_km_week: Mapped[float | None] = mapped_column(Float, nullable=True)
+    swim_max_session_min: Mapped[int | None] = mapped_column(Integer, nullable=True)   # hard cap on pool time (minutes)
     model_analysis: Mapped[str] = mapped_column(
         String, default="openrouter/anthropic/claude-sonnet-4.6"
     )
