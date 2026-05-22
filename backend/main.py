@@ -213,6 +213,16 @@ class PatchTodayResponse(BaseModel):
     error: str | None = None
 
 
+class LogWorkoutRequest(BaseModel):
+    user_id: str
+    date: str          # YYYY-MM-DD
+    sport: str         # e.g. "yoga", "strength", "swim"
+    duration_min: int
+    distance_m: float | None = None
+    perceived_effort: int | None = None  # 1-10
+    notes: str | None = None
+
+
 # ── Routes ───────────────────────────────────────────────────────────────
 
 
@@ -743,6 +753,35 @@ def get_checkin_for_date(user_id: str, check_date: str):
 # ── Override Prompt Endpoint ──────────────────────────────────────────────
 
 
+@app.post("/api/workouts/manual")
+def log_manual_workout(body: LogWorkoutRequest):
+    """Log a non-Garmin workout (e.g. yoga, strength) manually."""
+    try:
+        workout_date = date.fromisoformat(body.date)
+    except ValueError:
+        raise HTTPException(status_code=422, detail="Invalid date, expected YYYY-MM-DD")
+    if body.duration_min < 1:
+        raise HTTPException(status_code=422, detail="duration_min must be >= 1")
+    with get_session() as session:
+        # Verify user exists
+        user = session.execute(select(User).where(User.id == body.user_id)).scalar_one_or_none()
+        if user is None:
+            raise HTTPException(status_code=404, detail="User not found")
+        workout = Workout(
+            user_id=body.user_id,
+            date=workout_date,
+            sport=body.sport.lower().strip(),
+            duration_min=body.duration_min,
+            distance_m=body.distance_m,
+            perceived_effort=body.perceived_effort,
+            garmin_activity_id=None,
+            raw_json=json.dumps({"source": "manual", "notes": body.notes}) if body.notes else json.dumps({"source": "manual"}),
+        )
+        session.add(workout)
+        session.flush()
+        return {"id": workout.id, "date": str(workout_date), "sport": workout.sport, "duration_min": workout.duration_min}
+
+
 @app.get("/api/plans/override-prompt/{user_id}")
 def get_override_prompt(user_id: str):
     with get_session() as session:
@@ -965,6 +1004,22 @@ def get_kpi_metrics(
 
     weekly_volume = sorted(weekly.values(), key=lambda x: x["week_start"])
 
+    # ── weekly distance by sport (km) ─────────────────────────────────
+    weekly_dist: dict[str, dict] = {}
+    for w in workouts_raw:
+        if not w["date"] or not w.get("distance_m"):
+            continue
+        d = date.fromisoformat(w["date"])
+        week_start = str(d - timedelta(days=d.weekday()))
+        if week_start not in weekly_dist:
+            weekly_dist[week_start] = {"week_start": week_start, "by_sport": {}}
+        sport = w["sport"] or "unknown"
+        km = (w["distance_m"] or 0) / 1000
+        weekly_dist[week_start]["by_sport"][sport] = (
+            round(weekly_dist[week_start]["by_sport"].get(sport, 0) + km, 2)
+        )
+    weekly_distance = sorted(weekly_dist.values(), key=lambda x: x["week_start"])
+
     return {
         "summary": summary,
         "dates": dates_out,
@@ -978,6 +1033,7 @@ def get_kpi_metrics(
         "active_calories": active_calories,
         "workouts_14d": workouts_14d,
         "weekly_volume": weekly_volume,
+        "weekly_distance": weekly_distance,
     }
 
 
@@ -1037,6 +1093,15 @@ def get_goal_metrics(user_id: str):
         plan_data = json.loads(plan_row.plan_json) if plan_row else None
         plan_valid_from = str(plan_row.valid_from) if (plan_row and plan_row.valid_from) else None
 
+        # Use the earliest plan ever created as training start (not the rolling current plan)
+        earliest_plan_row = session.execute(
+            select(TrainingPlanRow)
+            .where(TrainingPlanRow.user_id == user_id)
+            .order_by(TrainingPlanRow.valid_from.asc())
+            .limit(1)
+        ).scalar_one_or_none()
+        earliest_plan_start = str(earliest_plan_row.valid_from) if earliest_plan_row else plan_valid_from
+
         workout_dates = {
             str(w.date)
             for w in session.execute(
@@ -1070,8 +1135,8 @@ def get_goal_metrics(user_id: str):
     phase, phase_description = _compute_phase(weeks_to_goal)
 
     # ── Completion % ──────────────────────────────────────────────────
-    if plan_valid_from and goal_date_val:
-        plan_start = date.fromisoformat(plan_valid_from)
+    if earliest_plan_start and goal_date_val:
+        plan_start = date.fromisoformat(earliest_plan_start)
         total_days = (goal_date_val - plan_start).days
         elapsed = (today - plan_start).days
         completion_pct = (

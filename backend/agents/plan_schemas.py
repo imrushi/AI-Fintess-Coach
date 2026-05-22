@@ -55,12 +55,31 @@ class StrengthExercise(BaseModel):
 
 
 class SwimSet(BaseModel):
-    stroke: str
-    distance_m: int
-    reps: int
+    stroke: str = "freestyle"
+    distance_m: int = 100
+    reps: int = 1
     rest_sec: int | None = None
     intensity: str | None = None
     notes: str | None = None
+    # Accept extra LLM fields without failing
+    model_config = {"extra": "ignore"}
+
+    @field_validator("stroke", mode="before")
+    @classmethod
+    def coerce_stroke(cls, v: object) -> str:
+        if v is None or v == "":
+            return "freestyle"
+        return str(v)
+
+    @field_validator("reps", "distance_m", mode="before")
+    @classmethod
+    def coerce_int(cls, v: object) -> int:
+        if v is None:
+            return 1
+        try:
+            return int(v)
+        except (TypeError, ValueError):
+            return 1
 
 
 # Map common LLM sport names to our enum values
@@ -94,6 +113,20 @@ class TrainingSession(BaseModel):
     nutrition: NutritionGuidance = NutritionGuidance()
     override_applied: str | None = None
     readiness_adjusted: bool = False
+
+    @field_validator("exercises", "swim_sets", mode="before")
+    @classmethod
+    def coerce_none_list(cls, v: object) -> object:
+        if v is None:
+            return []
+        return v
+
+    @field_validator("override_applied", mode="before")
+    @classmethod
+    def coerce_override(cls, v: object) -> object:
+        if isinstance(v, bool) or v is False or v is True:
+            return None
+        return v
 
     @field_validator("sport", mode="before")
     @classmethod
@@ -156,17 +189,28 @@ class TrainingPlan(BaseModel):
 
     @model_validator(mode="after")
     def auto_fill_sessions(self) -> TrainingPlan:
-        """Pad missing days in the 7-day window with REST sessions instead of hard-failing."""
-        if len(self.sessions) == 7:
-            return self
-        existing_dates = {s.date for s in self.sessions}
+        """Ensure exactly 7 sessions within the valid window.
+        
+        - If < 7: pad missing days with REST sessions.
+        - If > 7: keep only sessions within valid_from..valid_to window.
+        """
         start = date_cls.fromisoformat(self.valid_from)
-        filled = list(self.sessions)
+        end = date_cls.fromisoformat(self.valid_to)
+        valid_dates = {(start + timedelta(days=i)).isoformat() for i in range(7)}
+
+        if len(self.sessions) == 7 and all(s.date in valid_dates for s in self.sessions):
+            return self
+
+        # Trim any sessions outside the window
+        in_window = [s for s in self.sessions if s.date in valid_dates]
+        existing_dates = {s.date for s in in_window}
+
+        # Pad missing days
         for i in range(7):
             d = (start + timedelta(days=i)).isoformat()
             if d not in existing_dates:
                 day_name = (start + timedelta(days=i)).strftime("%A")
-                filled.append(
+                in_window.append(
                     TrainingSession(
                         date=d,
                         day_of_week=day_name,
@@ -176,12 +220,12 @@ class TrainingPlan(BaseModel):
                         key_focus="Rest and recovery",
                     )
                 )
-        filled.sort(key=lambda s: s.date)
-        if len(filled) != 7:
+        in_window.sort(key=lambda s: s.date)
+        if len(in_window) != 7:
             raise ValueError(
-                f"sessions must contain exactly 7 entries, got {len(self.sessions)}"
+                f"sessions must contain exactly 7 entries, got {len(in_window)}"
             )
-        self.sessions = filled
+        self.sessions = in_window
         return self
 
     @model_validator(mode="after")

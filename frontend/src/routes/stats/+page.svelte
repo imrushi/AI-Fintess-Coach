@@ -1,7 +1,12 @@
 <script lang="ts">
   import { onMount } from "svelte";
   import { userId, globalError, isLoading } from "$lib/stores";
-  import { getKpiMetrics, getGoalProgress, triggerPipeline } from "$lib/api";
+  import {
+    getKpiMetrics,
+    getGoalProgress,
+    triggerPipeline,
+    logManualWorkout,
+  } from "$lib/api";
   import type { KpiMetrics, GoalProgress } from "$lib/types";
   import {
     trendIcon,
@@ -121,6 +126,27 @@
     }));
   });
 
+  // ── Distance progression derived ─────────────────────────────────────
+  const distanceLabels = $derived.by((): string[] => {
+    if (!kpi?.weekly_distance?.length) return [];
+    return kpi.weekly_distance.map((w) => formatWeekStart(w.week_start));
+  });
+  const distanceSports = $derived.by((): string[] => {
+    if (!kpi?.weekly_distance?.length) return [];
+    return [
+      ...new Set(kpi.weekly_distance.flatMap((w) => Object.keys(w.by_sport))),
+    ].filter((s) => ["swim", "bike", "run"].includes(s));
+  });
+  const distanceDatasets = $derived.by(() => {
+    if (!kpi?.weekly_distance?.length) return [];
+    const k = kpi;
+    return distanceSports.map((sport: string) => ({
+      label: `${sport} (km)`,
+      data: k.weekly_distance.map((w) => w.by_sport[sport] ?? 0),
+      color: SPORT_COLORS[sport] ?? "#94a3b8",
+    }));
+  });
+
   const acwrFill = $derived.by(() => {
     if (!kpi) return [];
     return kpi.acwr.map((v) => (v !== null ? v * 50 : null));
@@ -136,13 +162,62 @@
     await triggerPipeline($userId);
     await reload();
   }
+
+  // ── Manual workout log ────────────────────────────────────────────────
+  let showLogForm = $state(false);
+  let logSaving = $state(false);
+  let logForm = $state({
+    date: new Date().toISOString().split("T")[0],
+    sport: "yoga",
+    duration_min: 45,
+    perceived_effort: null as number | null,
+    notes: "",
+  });
+
+  const MANUAL_SPORTS = [
+    "yoga",
+    "strength",
+    "pilates",
+    "hiit",
+    "boxing",
+    "climb",
+    "other",
+  ];
+
+  async function handleLogWorkout() {
+    if (!$userId) return;
+    logSaving = true;
+    try {
+      await logManualWorkout({
+        user_id: $userId,
+        date: logForm.date,
+        sport: logForm.sport,
+        duration_min: logForm.duration_min,
+        perceived_effort: logForm.perceived_effort,
+        notes: logForm.notes || null,
+      });
+      showLogForm = false;
+      logForm = {
+        date: new Date().toISOString().split("T")[0],
+        sport: "yoga",
+        duration_min: 45,
+        perceived_effort: null,
+        notes: "",
+      };
+      await reload();
+    } catch {
+      // noop — apiFetch will surface errors
+    } finally {
+      logSaving = false;
+    }
+  }
 </script>
 
 <div class="max-w-7xl mx-auto px-4 py-6 space-y-6">
   <!-- ROW 0: Header -->
-  <div class="flex items-center justify-between">
+  <div class="flex items-center justify-between flex-wrap gap-3">
     <h1 class="text-2xl font-bold text-slate-100">Performance Dashboard</h1>
-    <div class="flex gap-2">
+    <div class="flex gap-2 flex-wrap">
       {#each [7, 14, 28] as d}
         <button
           onclick={() => {
@@ -155,8 +230,87 @@
           }`}>{d}d</button
         >
       {/each}
+      <button
+        onclick={() => (showLogForm = !showLogForm)}
+        class="px-3 py-1 rounded-lg text-sm font-medium bg-pink-700 hover:bg-pink-600 text-white transition-colors"
+      >
+        + Log Workout
+      </button>
     </div>
   </div>
+
+  <!-- Manual workout log form -->
+  {#if showLogForm}
+    <div class="bg-slate-800 border border-slate-700 rounded-xl p-4 space-y-4">
+      <h2 class="font-semibold text-slate-200">Log Non-Garmin Workout</h2>
+      <div class="grid grid-cols-2 md:grid-cols-4 gap-3">
+        <div class="flex flex-col gap-1">
+          <label class="text-xs text-slate-400">Date</label>
+          <input
+            type="date"
+            bind:value={logForm.date}
+            class="bg-slate-700 border border-slate-600 rounded-lg px-3 py-1.5 text-sm text-slate-200"
+          />
+        </div>
+        <div class="flex flex-col gap-1">
+          <label class="text-xs text-slate-400">Sport</label>
+          <select
+            bind:value={logForm.sport}
+            class="bg-slate-700 border border-slate-600 rounded-lg px-3 py-1.5 text-sm text-slate-200"
+          >
+            {#each MANUAL_SPORTS as s}
+              <option value={s}>{s}</option>
+            {/each}
+          </select>
+        </div>
+        <div class="flex flex-col gap-1">
+          <label class="text-xs text-slate-400">Duration (min)</label>
+          <input
+            type="number"
+            min="1"
+            max="360"
+            bind:value={logForm.duration_min}
+            class="bg-slate-700 border border-slate-600 rounded-lg px-3 py-1.5 text-sm text-slate-200"
+          />
+        </div>
+        <div class="flex flex-col gap-1">
+          <label class="text-xs text-slate-400">Effort (1–10)</label>
+          <input
+            type="number"
+            min="1"
+            max="10"
+            placeholder="—"
+            bind:value={logForm.perceived_effort}
+            class="bg-slate-700 border border-slate-600 rounded-lg px-3 py-1.5 text-sm text-slate-200"
+          />
+        </div>
+      </div>
+      <div class="flex flex-col gap-1">
+        <label class="text-xs text-slate-400">Notes (optional)</label>
+        <input
+          type="text"
+          placeholder="e.g. 45min flow yoga, felt great"
+          bind:value={logForm.notes}
+          class="bg-slate-700 border border-slate-600 rounded-lg px-3 py-1.5 text-sm text-slate-200 w-full"
+        />
+      </div>
+      <div class="flex gap-2">
+        <button
+          onclick={handleLogWorkout}
+          disabled={logSaving}
+          class="px-4 py-2 bg-pink-700 hover:bg-pink-600 disabled:opacity-50 text-white text-sm font-medium rounded-lg transition-colors"
+        >
+          {logSaving ? "Saving…" : "Save"}
+        </button>
+        <button
+          onclick={() => (showLogForm = false)}
+          class="px-4 py-2 bg-slate-700 hover:bg-slate-600 text-slate-300 text-sm rounded-lg transition-colors"
+        >
+          Cancel
+        </button>
+      </div>
+    </div>
+  {/if}
 
   {#if loading}
     <!-- Skeleton loaders -->
@@ -544,6 +698,42 @@
         >
       </div>
     </div>
+
+    <!-- ROW 5b: Weekly Distance Progression (swim/bike/run) -->
+    {#if distanceDatasets.length > 0}
+      <div
+        class="bg-slate-800 border border-slate-700 rounded-xl p-4 space-y-3"
+      >
+        <div class="flex items-center justify-between flex-wrap gap-2">
+          <div>
+            <h2 class="font-semibold text-slate-200">
+              Weekly Distance Progression
+            </h2>
+            <p class="text-xs text-slate-500 mt-0.5">
+              Swim · Bike · Run in km/week
+            </p>
+          </div>
+          <div class="flex flex-wrap gap-2">
+            {#each distanceSports as sport}
+              <span class="flex items-center gap-1 text-xs text-slate-300">
+                <span
+                  class="inline-block w-3 h-3 rounded-sm"
+                  style="background:{SPORT_COLORS[sport] ?? '#94a3b8'}"
+                ></span>
+                {sport}
+              </span>
+            {/each}
+          </div>
+        </div>
+        <BarChart
+          labels={distanceLabels}
+          datasets={distanceDatasets}
+          stacked={false}
+          height={200}
+          unit="km"
+        />
+      </div>
+    {/if}
 
     <!-- ROW 6: ACWR + Resting HR -->
     <div class="grid md:grid-cols-2 gap-4">

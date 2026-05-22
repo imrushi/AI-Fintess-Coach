@@ -202,8 +202,9 @@ class PlanningAgent:
             else str(date.today() + timedelta(days=1))
         )
 
-        # Pre-check: if gate == PROCEED with no override and target session already exists,
-        # the plan is fine as-is — skip LLM entirely (zero token cost).
+        # Pre-check: if gate == PROCEED with no override and TODAY session already exists,
+        # skip LLM (zero token cost). Only applies to scheduler-driven "today" patches —
+        # explicit "Update Tomorrow" requests (patch_target=="tomorrow") always re-generate.
         existing_target = next(
             (s for s in current_plan_dict.get("sessions", []) if s.get("date") == target_date_str),
             None,
@@ -212,11 +213,11 @@ class PlanningAgent:
             readiness_report.training_gate == TrainingGate.PROCEED
             and override_choice is None
             and existing_target is not None
-            and patch_target == "tomorrow"  # always re-patch today when explicitly requested
+            and patch_target == "today"  # never skip explicit "Update Tomorrow" requests
         ):
             logger.info(
-                "Patch skipped for %s — gate=PROCEED, no override, %s session exists (%s). Zero tokens used.",
-                self.user_id, patch_target, target_date_str,
+                "Patch skipped for %s — gate=PROCEED, no override, today session exists (%s). Zero tokens used.",
+                self.user_id, target_date_str,
             )
             existing_plan = TrainingPlan.model_validate(current_plan_dict)
             return PlanningResult(

@@ -23,23 +23,36 @@ class GarminClient:
 
     def connect(self) -> None:
         if _SESSION_PATH.exists():
-            print("Loading cached session...")
+            logger.info("Loading cached Garmin session...")
             try:
                 with open(_SESSION_PATH, "rb") as f:
                     self.client = pickle.load(f)
                 # Validate the session is still alive
                 self.client.get_full_name()
-                print("Cached session valid.")
+                logger.info("Cached Garmin session valid.")
                 return
-            except (GarminConnectAuthenticationError, Exception):
-                print("Cached session expired, re-authenticating...")
+            except Exception as e:
+                logger.warning("Cached session invalid (%s) — deleting and re-authenticating...", e)
+                try:
+                    _SESSION_PATH.unlink()
+                except OSError:
+                    pass
+                self.client = None
 
-        print("Logging in to Garmin Connect...")
-        self.client = Garmin(self.email, self.password)
-        self.client.login()
-        with open(_SESSION_PATH, "wb") as f:
-            pickle.dump(self.client, f)
-        print("Login successful.")
+        logger.info("Logging in to Garmin Connect...")
+        try:
+            self.client = Garmin(self.email, self.password)
+            self.client.login()
+            with open(_SESSION_PATH, "wb") as f:
+                pickle.dump(self.client, f)
+            logger.info("Garmin login successful — session cached.")
+        except GarminConnectAuthenticationError as e:
+            # Ensure no stale file is left behind
+            try:
+                _SESSION_PATH.unlink(missing_ok=True)
+            except OSError:
+                pass
+            raise RuntimeError(f"Authentication failed: {e}") from e
 
     # ── Individual data fetchers ─────────────────────────────────────────
 
@@ -89,6 +102,15 @@ class GarminClient:
         )
         return result
 
+    def _force_reauth(self) -> None:
+        """Delete cached session and re-authenticate from scratch."""
+        try:
+            _SESSION_PATH.unlink(missing_ok=True)
+        except OSError:
+            pass
+        self.client = None
+        self.connect()
+
     def fetch_day(self, date_str: str) -> dict:
         result: dict = {"date": date_str}
 
@@ -108,12 +130,29 @@ class GarminClient:
             "weight": lambda: self.get_weight(date_str, date_str),
         }
 
+        _reauthed = False
         for key, fetcher in fetchers.items():
             try:
                 result[key] = fetcher()
-                print(f"  ✓ {key}")
+                logger.debug("  ✓ %s", key)
+            except GarminConnectAuthenticationError as exc:
+                # Session expired mid-sync — re-auth once and retry the whole fetch
+                if not _reauthed:
+                    logger.warning("Got 401 on %s — forcing re-auth and retrying", key)
+                    self._force_reauth()
+                    _reauthed = True
+                    try:
+                        result[key] = fetcher()
+                        logger.debug("  ✓ %s (after reauth)", key)
+                        continue
+                    except Exception as exc2:
+                        logger.warning("  ✗ %s (after reauth): %s", key, exc2)
+                        result[key] = None
+                else:
+                    logger.warning("  ✗ %s: %s", key, exc)
+                    result[key] = None
             except Exception as exc:
                 result[key] = None
-                print(f"  ✗ {key}: {exc}")
+                logger.warning("  ✗ %s: %s", key, exc)
 
         return result

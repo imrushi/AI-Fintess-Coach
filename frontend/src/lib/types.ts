@@ -246,6 +246,11 @@ export interface WeeklyVolume {
   by_sport: Record<string, number>
 }
 
+export interface WeeklyDistance {
+  week_start: string
+  by_sport: Record<string, number>  // km
+}
+
 export interface KpiMetrics {
   dates: string[]
   readiness_scores: (number | null)[]
@@ -259,6 +264,7 @@ export interface KpiMetrics {
   summary: KpiSummary
   workouts_14d: WorkoutEntry[]
   weekly_volume: WeeklyVolume[]
+  weekly_distance: WeeklyDistance[]
 }
 
 export interface GoalProgress {

@@ -181,6 +181,23 @@ export async function patchTodaySession(
   })
 }
 
+export interface LogWorkoutPayload {
+  user_id: string
+  date: string
+  sport: string
+  duration_min: number
+  distance_m?: number | null
+  perceived_effort?: number | null
+  notes?: string | null
+}
+
+export async function logManualWorkout(payload: LogWorkoutPayload): Promise<{ id: string; date: string; sport: string; duration_min: number }> {
+  return apiFetch('/workouts/manual', {
+    method: 'POST',
+    body: JSON.stringify(payload),
+  })
+}
+
 // ── Profile ───────────────────────────────────────────────────────────────
 
 export async function getProfile(userId: string): Promise<UserProfile> {

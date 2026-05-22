@@ -174,12 +174,32 @@ class AgentOrchestrator:
                 existing_plan_json = existing_row.plan_json
 
         if existing_plan_json is not None:
-            logger.info(
-                "Existing plan found for %s — running daily patch (%s)", user_id, patch_target
-            )
-            planning = await self.run_planning_patch(
-                user_id, report, existing_plan_json, override_choice, patch_target
-            )
+            # Check if plan's window has expired — if so, generate fresh plan
+            try:
+                import json as _json2
+                _plan_data = _json2.loads(existing_plan_json)
+                _valid_to = _plan_data.get("valid_to", "")
+                from datetime import date as _date
+                if _valid_to and _date.fromisoformat(_valid_to) < _date.today():
+                    logger.info(
+                        "Existing plan for %s expired (%s) — generating fresh 7-day plan",
+                        user_id, _valid_to,
+                    )
+                    planning = await self.run_planning(user_id, report, override_choice)
+                else:
+                    logger.info(
+                        "Existing plan found for %s — running daily patch (%s)", user_id, patch_target
+                    )
+                    planning = await self.run_planning_patch(
+                        user_id, report, existing_plan_json, override_choice, patch_target
+                    )
+            except Exception:
+                logger.info(
+                    "Existing plan found for %s — running daily patch (%s)", user_id, patch_target
+                )
+                planning = await self.run_planning_patch(
+                    user_id, report, existing_plan_json, override_choice, patch_target
+                )
         else:
             logger.info("No existing plan for %s — generating full 7-day plan", user_id)
             planning = await self.run_planning(user_id, report, override_choice)
