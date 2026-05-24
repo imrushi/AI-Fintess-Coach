@@ -186,6 +186,7 @@ class RunPipelineRequest(BaseModel):
     user_id: str
     override_choice: str | None = None
     patch_target: str = "tomorrow"  # "today" or "tomorrow"
+    sport_override: str | None = None  # e.g. "run", "bike", "swim", "yoga", "custom"
 
 
 class RunPipelineResponse(BaseModel):
@@ -202,6 +203,7 @@ class RunPipelineResponse(BaseModel):
 class PatchTodayRequest(BaseModel):
     user_id: str
     intensity_preference: str | None = None  # "easy", "moderate", "hard", "as_planned", "rest"
+    sport_override: str | None = None  # e.g. "run", "bike", "swim", "yoga", "custom"
 
 
 class PatchTodayResponse(BaseModel):
@@ -432,7 +434,7 @@ async def get_analysis_history(
 
 @app.post("/api/pipeline/run")
 async def run_pipeline(body: RunPipelineRequest):
-    result = await orchestrator.run_full_pipeline(body.user_id, body.override_choice, body.patch_target)
+    result = await orchestrator.run_full_pipeline(body.user_id, body.override_choice, body.patch_target, body.sport_override)
     if not result.success or result.analysis_result is None:
         return RunPipelineResponse(
             success=False,
@@ -521,7 +523,7 @@ async def patch_today_session(body: PatchTodayRequest):
     plan_dict = _json.loads(plan_json_str)
 
     pkg = build_today_patch_prompt(
-        body.user_id, report, plan_dict, body.intensity_preference
+        body.user_id, report, plan_dict, body.intensity_preference, body.sport_override
     )
 
     # 4 — Call LLM

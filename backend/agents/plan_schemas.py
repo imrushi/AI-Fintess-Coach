@@ -48,10 +48,43 @@ class NutritionGuidance(BaseModel):
 
 
 class StrengthExercise(BaseModel):
-    exercise: str
-    sets: int
-    reps_or_duration: str
+    exercise: str = "exercise"
+    sets: int = 1
+    reps_or_duration: str = "as described"
     notes: str | None = None
+    model_config = {"extra": "ignore"}
+
+    @model_validator(mode="before")
+    @classmethod
+    def remap_name_field(cls, data: object) -> object:
+        """LLM sometimes sends 'name' instead of 'exercise'."""
+        if isinstance(data, dict) and "exercise" not in data and "name" in data:
+            data = {**data, "exercise": data["name"]}
+        return data
+
+    @field_validator("exercise", mode="before")
+    @classmethod
+    def coerce_exercise(cls, v: object) -> str:
+        if v is None or v == "":
+            return "exercise"
+        return str(v)
+
+    @field_validator("sets", mode="before")
+    @classmethod
+    def coerce_sets(cls, v: object) -> int:
+        if v is None:
+            return 1
+        try:
+            return int(v)
+        except (TypeError, ValueError):
+            return 1
+
+    @field_validator("reps_or_duration", mode="before")
+    @classmethod
+    def coerce_reps(cls, v: object) -> str:
+        if v is None or v == "":
+            return "as described"
+        return str(v)
 
 
 class SwimSet(BaseModel):

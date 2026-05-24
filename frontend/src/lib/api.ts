@@ -152,10 +152,10 @@ export async function runFullPipeline(userId: string, overrideChoice?: string, p
   })
 }
 
-export async function patchTomorrowSession(userId: string): Promise<PipelineRunResult> {
+export async function patchTomorrowSession(userId: string, sportOverride?: string | null): Promise<PipelineRunResult> {
   return apiFetch('/pipeline/run', {
     method: 'POST',
-    body: JSON.stringify({ user_id: userId, override_choice: null, patch_target: 'tomorrow' }),
+    body: JSON.stringify({ user_id: userId, override_choice: null, patch_target: 'tomorrow', sport_override: sportOverride ?? null }),
   })
 }
 
@@ -171,12 +171,14 @@ export interface PatchTodayResult {
 export async function patchTodaySession(
   userId: string,
   intensityPreference?: string,
+  sportOverride?: string | null,
 ): Promise<PatchTodayResult> {
   return apiFetch('/plans/patch-today', {
     method: 'POST',
     body: JSON.stringify({
       user_id: userId,
       intensity_preference: intensityPreference ?? null,
+      sport_override: sportOverride ?? null,
     }),
   })
 }

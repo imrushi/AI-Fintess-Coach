@@ -195,11 +195,14 @@
   let showPatchTodayModal = $state(false);
   let patchTodayLoading = $state(false);
 
-  async function handlePatchToday(intensity: string) {
+  async function handlePatchToday(
+    intensity: string,
+    sportOverride: string | null,
+  ) {
     if (!$userId) return;
     patchTodayLoading = true;
     try {
-      const result = await patchTodaySession($userId, intensity);
+      const result = await patchTodaySession($userId, intensity, sportOverride);
       if (!result.success) {
         addToast(result.error ?? "Update failed", "error");
         return;
@@ -216,17 +219,22 @@
   }
 
   // ── Patch tomorrow trigger ────────────────────────────────────────────
+  let showPatchTomorrowModal = $state(false);
   let patchTomorrowLoading = $state(false);
 
-  async function handlePatchTomorrow() {
+  async function handlePatchTomorrow(
+    intensity: string,
+    sportOverride: string | null,
+  ) {
     if (!$userId || patchTomorrowLoading) return;
     patchTomorrowLoading = true;
     try {
-      const result = await patchTomorrowSession($userId);
+      const result = await patchTomorrowSession($userId, sportOverride);
       if (!result.success) {
         addToast(result.error ?? "Update failed", "error");
         return;
       }
+      showPatchTomorrowModal = false;
       addToast("Tomorrow's session updated!", "success");
       const plan = await getCurrentPlan($userId);
       currentPlan.set(plan);
@@ -806,7 +814,7 @@
               Update Today
             </button>
             <button
-              onclick={handlePatchTomorrow}
+              onclick={() => (showPatchTomorrowModal = true)}
               disabled={patchTomorrowLoading}
               class="flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium
                      bg-violet-600/20 hover:bg-violet-600/40 border border-violet-500/40
@@ -1363,8 +1371,20 @@
   report={$todayReport}
   open={showPatchTodayModal}
   loading={patchTodayLoading}
+  title="Update Today's Session"
+  submitLabel="Update Today"
   onsubmit={handlePatchToday}
   ondismiss={() => (showPatchTodayModal = false)}
+/>
+
+<PatchTodayModal
+  report={$todayReport}
+  open={showPatchTomorrowModal}
+  loading={patchTomorrowLoading}
+  title="Update Tomorrow's Session"
+  submitLabel="Update Tomorrow"
+  onsubmit={handlePatchTomorrow}
+  ondismiss={() => (showPatchTomorrowModal = false)}
 />
 
 <style>

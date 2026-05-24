@@ -190,6 +190,7 @@ class PlanningAgent:
         current_plan_json: str,
         override_choice: str | None = None,
         patch_target: str = "tomorrow",
+        sport_override: str | None = None,
     ) -> PlanningResult:
         """Update only one session in the existing plan. Much cheaper than a full run.
 
@@ -235,11 +236,11 @@ class PlanningAgent:
         # Step 1 — Build patch prompt (today vs tomorrow)
         if patch_target == "today":
             pkg = build_today_patch_prompt(
-                self.user_id, readiness_report, current_plan_dict, override_choice
+                self.user_id, readiness_report, current_plan_dict, override_choice, sport_override
             )
         else:
             pkg = build_daily_patch_prompt(
-                self.user_id, readiness_report, current_plan_dict, override_choice
+                self.user_id, readiness_report, current_plan_dict, override_choice, sport_override
             )
         logger.info(
             "Patch prompt ready (%s): ~%d tokens (vs full plan ~400+)", patch_target, pkg.token_estimate

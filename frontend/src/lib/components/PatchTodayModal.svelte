@@ -7,7 +7,9 @@
     report: ReadinessReport | null;
     open?: boolean;
     loading?: boolean;
-    onsubmit?: (intensity: string) => void;
+    title?: string;
+    submitLabel?: string;
+    onsubmit?: (intensity: string, sportOverride: string | null) => void;
     ondismiss?: () => void;
   }
 
@@ -15,6 +17,8 @@
     report,
     open = false,
     loading = false,
+    title = "Update Today's Session",
+    submitLabel = "Update Today",
     onsubmit,
     ondismiss,
   }: Props = $props();
@@ -62,7 +66,23 @@
     },
   ] as const;
 
+  const SPORT_OPTIONS: Array<{
+    value: string | null;
+    label: string;
+    emoji: string;
+  }> = [
+    { value: null, label: "As planned", emoji: "📋" },
+    { value: "swim", label: "Swim", emoji: "🏊" },
+    { value: "run", label: "Run", emoji: "🏃" },
+    { value: "bike", label: "Bike", emoji: "🚴" },
+    { value: "yoga", label: "Yoga", emoji: "🧘" },
+    { value: "strength", label: "Strength", emoji: "🏋️" },
+    { value: "custom", label: "Other…", emoji: "✏️" },
+  ];
+
   let selected = $state<string>("moderate");
+  let selectedSport = $state<string | null>(null);
+  let customSportName = $state("");
 
   const GATE_PILL: Record<string, string> = {
     green: "bg-green-900/40 text-green-300 border border-green-500/40",
@@ -72,7 +92,13 @@
   };
 
   function handleSubmit() {
-    onsubmit?.(selected);
+    let sport: string | null = selectedSport;
+    if (sport === "custom") {
+      sport = customSportName.trim()
+        ? `custom:${customSportName.trim()}`
+        : null;
+    }
+    onsubmit?.(selected, sport);
   }
 </script>
 
@@ -97,9 +123,9 @@
 
       <!-- Header -->
       <div>
-        <h2 class="text-lg font-bold text-slate-100">Update Today's Session</h2>
+        <h2 class="text-lg font-bold text-slate-100">{title}</h2>
         <p class="text-sm text-slate-400 mt-1">
-          Regenerate today's workout with your preferred intensity.
+          Regenerate the workout with your preferred intensity and sport.
         </p>
       </div>
 
@@ -148,6 +174,38 @@
         </div>
       {/if}
 
+      <!-- Sport override selector -->
+      <div class="space-y-2">
+        <p class="text-sm font-medium text-slate-300">
+          Change sport <span class="text-slate-500 font-normal">(optional)</span
+          >
+        </p>
+        <div class="flex flex-wrap gap-2">
+          {#each SPORT_OPTIONS as opt}
+            <button
+              onclick={() => {
+                selectedSport = opt.value;
+              }}
+              class="px-3 py-1.5 rounded-lg border text-sm transition-all
+                {selectedSport === opt.value
+                ? 'bg-indigo-900/50 border-indigo-400 text-indigo-200 ring-1 ring-indigo-400'
+                : 'border-slate-700/50 bg-slate-800/40 text-slate-400 hover:border-slate-500'}"
+            >
+              {opt.emoji}
+              {opt.label}
+            </button>
+          {/each}
+        </div>
+        {#if selectedSport === "custom"}
+          <input
+            type="text"
+            placeholder="Sport name (e.g. boxing, pilates)"
+            bind:value={customSportName}
+            class="w-full bg-slate-700 border border-slate-600 rounded-lg px-3 py-2 text-sm text-slate-200 mt-1"
+          />
+        {/if}
+      </div>
+
       <!-- Intensity selector -->
       <div class="space-y-2">
         <p class="text-sm font-medium text-slate-300">Choose intensity</p>
@@ -195,7 +253,7 @@
             ></span>
             Updating…
           {:else}
-            Update Today
+            {submitLabel}
           {/if}
         </button>
       </div>

@@ -353,6 +353,7 @@ def build_daily_patch_prompt(
     readiness_report: ReadinessReport,
     current_plan_json: dict,
     override_choice: str | None = None,
+    sport_override: str | None = None,
 ) -> PatchPromptPackage:
     """Build a minimal prompt to update only tomorrow's session."""
     from db.reader import get_user_profile
@@ -425,6 +426,16 @@ def build_daily_patch_prompt(
     elif override_choice == "rest_as_recommended":
         sections.append("## Override: REST confirmed. Apply MANDATORY_REST rules.")
 
+    if sport_override:
+        sport_label = sport_override.replace("custom:", "").strip()
+        sections.append(
+            f"## Sport Override (MANDATORY)\n"
+            f"User cannot do the originally planned sport tomorrow. "
+            f"Change the session sport to: {sport_label}. "
+            f"Redesign the workout appropriately for {sport_label} while keeping the same training stimulus and duration. "
+            f"Do NOT include swim_sets unless the new sport is swimming."
+        )
+
     # Existing session for tomorrow
     if existing_session:
         sections.append(
@@ -474,10 +485,12 @@ def build_today_patch_prompt(
     readiness_report: ReadinessReport,
     current_plan_json: dict,
     intensity_preference: str | None = None,
+    sport_override: str | None = None,
 ) -> PatchPromptPackage:
     """Build a prompt to re-generate only TODAY's session.
 
     intensity_preference: 'easy' | 'moderate' | 'hard' | 'as_planned' | 'rest' | None
+    sport_override: 'swim' | 'run' | 'bike' | 'yoga' | 'custom:<name>' | None
     """
     import calendar
     from db.reader import compute_hr_zones, get_user_profile
@@ -543,6 +556,16 @@ def build_today_patch_prompt(
         }
         instr = intensity_map.get(intensity_preference, f"User preference: {intensity_preference}")
         sections.append(f"## User Intensity Preference\n{instr}")
+
+    if sport_override:
+        sport_label = sport_override.replace("custom:", "").strip()
+        sections.append(
+            f"## Sport Override (MANDATORY)\n"
+            f"User cannot do the originally planned sport today. "
+            f"Change the session sport to: {sport_label}. "
+            f"Redesign the workout appropriately for {sport_label} while keeping the same training stimulus and duration. "
+            f"Do NOT include swim_sets unless the new sport is swimming."
+        )
 
     if existing_session:
         sections.append(
