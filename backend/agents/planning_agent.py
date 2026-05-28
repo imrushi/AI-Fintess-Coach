@@ -236,7 +236,10 @@ class PlanningAgent:
         # Step 1 — Build patch prompt (today vs tomorrow)
         if patch_target == "today":
             pkg = build_today_patch_prompt(
-                self.user_id, readiness_report, current_plan_dict, override_choice, sport_override
+                self.user_id, readiness_report, current_plan_dict,
+                intensity_preference=None,  # intensity comes from /patch-today endpoint directly
+                sport_override=sport_override,
+                override_choice=override_choice,
             )
         else:
             pkg = build_daily_patch_prompt(

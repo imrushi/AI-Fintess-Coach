@@ -200,6 +200,18 @@ export async function logManualWorkout(payload: LogWorkoutPayload): Promise<{ id
   })
 }
 
+export async function skipSession(userId: string, sessionDate: string, skipReason?: string | null): Promise<{ skipped: boolean; date: string }> {
+  return apiFetch('/sessions/skip', {
+    method: 'POST',
+    body: JSON.stringify({ user_id: userId, session_date: sessionDate, skip_reason: skipReason ?? null }),
+  })
+}
+
+export async function unskipSession(userId: string, sessionDate: string): Promise<{ skipped: boolean; date: string }> {
+  const params = new URLSearchParams({ user_id: userId, session_date: sessionDate })
+  return apiFetch(`/sessions/skip?${params}`, { method: 'DELETE' })
+}
+
 // ── Profile ───────────────────────────────────────────────────────────────
 
 export async function getProfile(userId: string): Promise<UserProfile> {

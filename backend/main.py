@@ -225,6 +225,12 @@ class LogWorkoutRequest(BaseModel):
     notes: str | None = None
 
 
+class SkipSessionRequest(BaseModel):
+    user_id: str
+    session_date: str   # YYYY-MM-DD
+    skip_reason: str | None = None  # e.g. "pool closed", "travel", "illness"
+
+
 # ── Routes ───────────────────────────────────────────────────────────────
 
 
@@ -784,6 +790,58 @@ def log_manual_workout(body: LogWorkoutRequest):
         return {"id": workout.id, "date": str(workout_date), "sport": workout.sport, "duration_min": workout.duration_min}
 
 
+@app.post("/api/sessions/skip")
+def skip_session(body: SkipSessionRequest):
+    """Mark a planned session as skipped. Upserts a UserFeedback row for that date."""
+    try:
+        session_date = date.fromisoformat(body.session_date)
+    except ValueError:
+        raise HTTPException(status_code=422, detail="Invalid date, expected YYYY-MM-DD")
+    with get_session() as s:
+        user = s.execute(select(User).where(User.id == body.user_id)).scalar_one_or_none()
+        if user is None:
+            raise HTTPException(status_code=404, detail="User not found")
+        # Upsert: update existing feedback row for this date, or create one
+        existing = s.execute(
+            select(UserFeedback).where(
+                UserFeedback.user_id == body.user_id,
+                UserFeedback.feedback_date == session_date,
+            )
+        ).scalar_one_or_none()
+        if existing:
+            existing.session_skipped = True
+            existing.skip_reason = body.skip_reason
+        else:
+            s.add(UserFeedback(
+                user_id=body.user_id,
+                feedback_date=session_date,
+                session_skipped=True,
+                skip_reason=body.skip_reason,
+            ))
+        s.flush()
+    return {"skipped": True, "date": str(session_date)}
+
+
+@app.delete("/api/sessions/skip")
+def unskip_session(user_id: str, session_date: str):
+    """Remove the skipped flag for a session date."""
+    try:
+        d = date.fromisoformat(session_date)
+    except ValueError:
+        raise HTTPException(status_code=422, detail="Invalid date, expected YYYY-MM-DD")
+    with get_session() as s:
+        existing = s.execute(
+            select(UserFeedback).where(
+                UserFeedback.user_id == user_id,
+                UserFeedback.feedback_date == d,
+            )
+        ).scalar_one_or_none()
+        if existing:
+            existing.session_skipped = False
+            existing.skip_reason = None
+    return {"skipped": False, "date": session_date}
+
+
 @app.get("/api/plans/override-prompt/{user_id}")
 def get_override_prompt(user_id: str):
     with get_session() as session:
@@ -1114,6 +1172,18 @@ def get_goal_metrics(user_id: str):
             ).scalars().all()
         }
 
+        # Dates explicitly marked as skipped (excused misses — excluded from denominator)
+        skipped_dates = {
+            str(f.feedback_date)
+            for f in session.execute(
+                select(UserFeedback).where(
+                    UserFeedback.user_id == user_id,
+                    UserFeedback.feedback_date >= cutoff_2w,
+                    UserFeedback.session_skipped == True,  # noqa: E712
+                )
+            ).scalars().all()
+        }
+
         readiness_rows = session.execute(
             select(ReadinessReportRow)
             .where(
@@ -1163,8 +1233,10 @@ def get_goal_metrics(user_id: str):
             if str(cutoff_2w) <= s.get("date", "") <= str(today)
             and s.get("sport") != "rest"
         ]
-        planned_count = len(planned)
-        completed_count = len({s["date"] for s in planned} & workout_dates)
+        # Excused skips: remove from denominator (life happens, not athlete's fault)
+        planned_excused = [s for s in planned if s.get("date") not in skipped_dates]
+        planned_count = len(planned_excused)
+        completed_count = len({s["date"] for s in planned_excused} & workout_dates)
         recent_consistency = (
             round(completed_count / planned_count * 100, 1) if planned_count else 100.0
         )

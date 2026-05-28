@@ -39,14 +39,14 @@ PUSH_THROUGH OVERRIDE (athlete chose to ignore rest recommendation):
 - Add explicit warning in session description
 
 WEEKLY SCHEDULE CONSTRAINTS (non-negotiable):
-- Tuesday: athlete travels to office — ONLY upper-body strength/calisthenics allowed (no running, cycling, or swimming). No gym equipment assumed; bodyweight only.
+- Tuesday: athlete travels to office — ONLY bodyweight strength/calisthenics allowed (no running, cycling, or swimming). No gym equipment assumed; full-body bodyweight movements permitted.
 - Wednesday: athlete travels back 200 km — mandatory REST day. No training of any kind. Active recovery (light walk or breathwork) is acceptable but do not schedule a workout.
 
 STRENGTH SESSIONS:
 - Include calisthenics/strength work on low-intensity days where appropriate
 - Format strength exercises as a list under the "exercises" key: [{"exercise": str, "sets": int, "reps_or_duration": str, "notes": str}]
 - Beginner level: prioritise bodyweight compound movements (push-ups, dead bugs, pike push-ups, wall holds)
-- Tuesday strength must be upper-body only: push-ups, pike push-ups, diamond push-ups, tricep dips, wall handstand holds, shoulder taps, plank variations, dead bugs
+- Tuesday strength must be full-body bodyweight: push-ups, pike push-ups, diamond push-ups, tricep dips, wall handstand holds, shoulder taps, plank variations, dead bugs, squats, lunges, glute bridges, mountain climbers, burpees, jump squats
 - Do not programme strength on the same day as Z4/Z5 sessions
 - For non-strength sessions, omit the exercises key or set it to []
 
@@ -78,6 +78,12 @@ MEDICAL/DIETARY:
 - Asthma: avoid high Z5 intervals; prefer Z2-Z3 sustained efforts
 - Joint injuries: reduce impact (more swimming/cycling, less running)
 - Include nutrition guidance respecting dietary preference and allergies
+
+MISSED/SKIPPED SESSIONS:
+- If athlete feedback includes session_skipped=true entries, treat those dates as training misses
+- 1 skip in 7 days: no load adjustment needed
+- 2-3 skips in 7 days: reduce overall week volume by 15-20%, prioritise consistency over intensity
+- 4+ skips in 7 days: treat as detraining risk, start with a lighter rebuilding week
 
 OUTPUT: Valid compact single-line JSON only — no markdown, no prose, no pretty-printing, no newlines inside the JSON.
 Schema: TrainingPlan with exactly 7 sessions (one per calendar day)."""
@@ -178,7 +184,7 @@ def build_planning_prompt(
         f"Dietary preference: {diet_pref}\n"
         f"Allergies: {diet_allergy}\n"
         f"Preferred long day: Saturday\n"
-        f"Travel constraints: Tuesday = office day (upper-body only); Wednesday = long return trip (rest day)\n"
+        f"Travel constraints: Tuesday = office day (bodyweight strength only, full-body OK); Wednesday = long return trip (rest day)\n"
         f"Swim equipment available: {swim_equipment}\n"
         f"Swim stroke proficiency: {swim_strokes}\n"
         f"Current weekly volume — Swim: {_vol(current_swim_km)} | Bike: {_vol(current_bike_km)} | Run: {_vol(current_run_km)}\n"
@@ -326,12 +332,16 @@ Apply the same gate rules as a full plan:
 - MANDATORY_REST: active recovery only (yoga, walk, easy swim <30min)
 
 Weekly schedule constraints:
-- Tuesday: upper-body strength/calisthenics only (no run/bike/swim — athlete travels to office)
+- Tuesday: bodyweight strength/calisthenics only (no run/bike/swim — athlete travels to office). Full-body movements allowed.
 - Wednesday: mandatory rest day (athlete travels back 200 km)
 
 Yoga sessions must include named poses, a breathing exercise block (box breathing, Nadi Shodhana, 4-7-8, etc.), \
 and be structured as: breathing warm-up → active poses → passive stretches → breathwork cool-down.
 
+BE CONCISE. Keep descriptions and notes short (1-2 sentences max). \
+Do not add long explanations or disclaimers. \
+If athlete feedback shows session_skipped=true for recent dates, acknowledge the missed session \
+and adjust the current session's load accordingly (reduce if multiple recent skips; no change for a single isolated skip). \
 Output ONLY a single valid compact JSON object matching the TrainingSession schema — \
 no markdown, no prose, no array wrapper.
 Schema: {date, day_of_week, sport, duration_min, intensity_zone, title, description, \
@@ -486,11 +496,13 @@ def build_today_patch_prompt(
     current_plan_json: dict,
     intensity_preference: str | None = None,
     sport_override: str | None = None,
+    override_choice: str | None = None,
 ) -> PatchPromptPackage:
     """Build a prompt to re-generate only TODAY's session.
 
     intensity_preference: 'easy' | 'moderate' | 'hard' | 'as_planned' | 'rest' | None
     sport_override: 'swim' | 'run' | 'bike' | 'yoga' | 'custom:<name>' | None
+    override_choice: 'push_through' | 'rest_as_recommended' | None  (readiness gate override)
     """
     import calendar
     from db.reader import compute_hr_zones, get_user_profile
@@ -556,6 +568,11 @@ def build_today_patch_prompt(
         }
         instr = intensity_map.get(intensity_preference, f"User preference: {intensity_preference}")
         sections.append(f"## User Intensity Preference\n{instr}")
+
+    if override_choice == "push_through":
+        sections.append("## Override: PUSH THROUGH — -25% volume, cap Z3, add warning.")
+    elif override_choice == "rest_as_recommended":
+        sections.append("## Override: REST confirmed. Apply MANDATORY_REST rules.")
 
     if sport_override:
         sport_label = sport_override.replace("custom:", "").strip()

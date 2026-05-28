@@ -164,6 +164,8 @@ class UserFeedback(Base):
     mood: Mapped[int | None] = mapped_column(Integer, nullable=True)
     override_choice: Mapped[str | None] = mapped_column(String, nullable=True)
     override_reason: Mapped[str | None] = mapped_column(String, nullable=True)
+    session_skipped: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False, server_default="0")
+    skip_reason: Mapped[str | None] = mapped_column(String, nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_utcnow)
 
     user: Mapped["User"] = relationship(back_populates="feedbacks")

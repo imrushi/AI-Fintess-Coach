@@ -192,6 +192,8 @@ def get_recent_feedback(user_id: str, days: int = 7) -> list[dict]:
                 "perceived_effort": r.perceived_effort,
                 "mood": r.mood,
                 "override_choice": r.override_choice,
+                "session_skipped": r.session_skipped,
+                "skip_reason": r.skip_reason,
             }
             for r in rows
         ]

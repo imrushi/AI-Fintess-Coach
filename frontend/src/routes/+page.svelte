@@ -39,6 +39,8 @@
     triggerSync,
     getKpiMetrics,
     patchTodaySession,
+    skipSession,
+    unskipSession,
   } from "$lib/api";
   import OverrideModal from "$lib/components/OverrideModal.svelte";
   import PatchTodayModal from "$lib/components/PatchTodayModal.svelte";
@@ -243,6 +245,46 @@
     } finally {
       patchTomorrowLoading = false;
     }
+  }
+
+  // ── Session skip ──────────────────────────────────────────────────────
+  // date string → true if skipped
+  let skippedDates = $state<Record<string, boolean>>({});
+  let skipReason = $state("");
+  let showSkipModal = $state(false);
+  let skipTargetDate = $state<string | null>(null);
+  let skipSaving = $state(false);
+
+  function openSkipModal(date: string) {
+    skipTargetDate = date;
+    skipReason = "";
+    showSkipModal = true;
+  }
+
+  async function handleSkip() {
+    if (!$userId || !skipTargetDate) return;
+    skipSaving = true;
+    try {
+      await skipSession($userId, skipTargetDate, skipReason || null);
+      skippedDates = { ...skippedDates, [skipTargetDate]: true };
+      showSkipModal = false;
+      addToast("Session marked as skipped.", "success");
+    } catch (e: unknown) {
+      addToast(e instanceof Error ? e.message : "Failed to skip", "error");
+    } finally {
+      skipSaving = false;
+    }
+  }
+
+  async function handleUnskip(date: string) {
+    if (!$userId) return;
+    try {
+      await unskipSession($userId, date);
+      const updated = { ...skippedDates };
+      delete updated[date];
+      skippedDates = updated;
+      addToast("Skip removed.", "success");
+    } catch {}
   }
 
   // ── Date helpers ──────────────────────────────────────────────────────
@@ -1087,6 +1129,38 @@
                         {/each}
                       </div>
                     {/if}
+                    <!-- Skip / unskip -->
+                    {#if session.sport !== "rest"}
+                      <div
+                        class="pt-2 border-t border-slate-700 flex items-center gap-2"
+                      >
+                        {#if skippedDates[session.date]}
+                          <span
+                            class="text-xs text-amber-400 flex items-center gap-1"
+                            >⚠ Marked as skipped</span
+                          >
+                          <button
+                            onclick={(e) => {
+                              e.stopPropagation();
+                              handleUnskip(session.date);
+                            }}
+                            class="ml-auto text-xs text-slate-400 hover:text-slate-200 underline"
+                            >Undo</button
+                          >
+                        {:else}
+                          <button
+                            onclick={(e) => {
+                              e.stopPropagation();
+                              openSkipModal(session.date);
+                            }}
+                            class="text-xs px-2.5 py-1 rounded-lg border border-amber-700/50 bg-amber-900/20
+                                   text-amber-400 hover:bg-amber-900/40 transition-colors"
+                          >
+                            Couldn't do it
+                          </button>
+                        {/if}
+                      </div>
+                    {/if}
                   </div>
                 {/if}
               {/each}
@@ -1317,6 +1391,38 @@
                         {/each}
                       </div>
                     {/if}
+                    <!-- Skip / unskip -->
+                    {#if session.sport !== "rest"}
+                      <div
+                        class="pt-2 border-t border-slate-700 flex items-center gap-2"
+                      >
+                        {#if skippedDates[session.date]}
+                          <span
+                            class="text-xs text-amber-400 flex items-center gap-1"
+                            >⚠ Marked as skipped</span
+                          >
+                          <button
+                            onclick={(e) => {
+                              e.stopPropagation();
+                              handleUnskip(session.date);
+                            }}
+                            class="ml-auto text-xs text-slate-400 hover:text-slate-200 underline"
+                            >Undo</button
+                          >
+                        {:else}
+                          <button
+                            onclick={(e) => {
+                              e.stopPropagation();
+                              openSkipModal(session.date);
+                            }}
+                            class="text-xs px-2.5 py-1 rounded-lg border border-amber-700/50 bg-amber-900/20
+                                   text-amber-400 hover:bg-amber-900/40 transition-colors"
+                          >
+                            Couldn't do it
+                          </button>
+                        {/if}
+                      </div>
+                    {/if}
                   </div>
                 {/if}
               {/each}
@@ -1386,6 +1492,58 @@
   onsubmit={handlePatchTomorrow}
   ondismiss={() => (showPatchTomorrowModal = false)}
 />
+
+<!-- Skip reason modal -->
+{#if showSkipModal}
+  <div
+    class="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm"
+    role="dialog"
+    aria-modal="true"
+  >
+    <div
+      class="relative w-full max-w-sm mx-4 bg-slate-900 border border-slate-700 rounded-xl p-6 space-y-4"
+    >
+      <h2 class="text-base font-bold text-slate-100">
+        Mark session as skipped
+      </h2>
+      <p class="text-sm text-slate-400">
+        Optional: why couldn't you do it? The AI coach will account for this in
+        planning.
+      </p>
+      <div class="flex flex-wrap gap-2">
+        {#each ["Pool closed", "Travel", "Illness", "Injury", "Work", "Tired"] as preset}
+          <button
+            onclick={() => (skipReason = preset)}
+            class="px-2.5 py-1 rounded-lg text-xs border transition-colors
+              {skipReason === preset
+              ? 'bg-amber-900/50 border-amber-600 text-amber-300'
+              : 'border-slate-700 bg-slate-800 text-slate-400 hover:border-slate-600'}"
+            >{preset}</button
+          >
+        {/each}
+      </div>
+      <input
+        type="text"
+        placeholder="Or type a reason…"
+        bind:value={skipReason}
+        class="w-full bg-slate-800 border border-slate-600 rounded-lg px-3 py-2 text-sm text-slate-200"
+      />
+      <div class="flex gap-3 pt-1">
+        <button
+          onclick={() => (showSkipModal = false)}
+          class="flex-1 px-4 py-2 bg-slate-700 hover:bg-slate-600 text-slate-300 text-sm rounded-lg"
+          >Cancel</button
+        >
+        <button
+          onclick={handleSkip}
+          disabled={skipSaving}
+          class="flex-1 px-4 py-2 bg-amber-700 hover:bg-amber-600 disabled:opacity-50 text-white text-sm font-medium rounded-lg"
+          >{skipSaving ? "Saving…" : "Mark as skipped"}</button
+        >
+      </div>
+    </div>
+  </div>
+{/if}
 
 <style>
   @keyframes fade-in {
