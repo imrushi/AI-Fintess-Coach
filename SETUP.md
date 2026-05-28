@@ -1,5 +1,5 @@
-# FitCoach AI — Setup Guide
-> **Days 1–6 implementation · Solo developer · Garmin-first · Multi-agent · SvelteKit**
+# AI Fitness Coach — Setup Guide
+> **Self-hosted · Garmin-first · Multi-agent · SvelteKit · Docker / Raspberry Pi**
 
 ---
 
@@ -13,25 +13,32 @@
 6. [Initial Garmin Sync](#6-initial-garmin-sync)
 7. [First Pipeline Run](#7-first-pipeline-run)
 8. [Frontend Setup](#8-frontend-setup)
-9. [Local Model Setup (Free / Zero Cost)](#9-local-model-setup-free--zero-cost)
-10. [Daily Operations](#10-daily-operations)
-11. [Resetting Data](#11-resetting-data)
-12. [Troubleshooting](#12-troubleshooting)
-13. [Architecture Overview](#13-architecture-overview)
-14. [API Reference](#14-api-reference)
-15. [Cost Estimates](#15-cost-estimates)
+9. [Docker Deployment (Raspberry Pi)](#9-docker-deployment-raspberry-pi)
+10. [Local Model Setup (Free / Zero Cost)](#10-local-model-setup-free--zero-cost)
+11. [Daily Operations](#11-daily-operations)
+12. [Resetting Data](#12-resetting-data)
+13. [Troubleshooting](#13-troubleshooting)
+14. [Architecture Overview](#14-architecture-overview)
+15. [API Reference](#15-api-reference)
+16. [Cost Estimates](#16-cost-estimates)
 
 ---
 
 ## 1. Prerequisites
 
-### Required
+### Required (local dev)
 | Dependency | Version | Check |
 |---|---|---|
-| Python | 3.11+ | `python --version` |
+| Python | 3.12+ | `python --version` |
 | Node.js | 20+ | `node --version` |
 | npm | 9+ | `npm --version` |
 | Git | any | `git --version` |
+
+### Required (Docker / production)
+| Dependency | Version | Check |
+|---|---|---|
+| Docker | 24+ | `docker --version` |
+| Docker Compose | v2+ | `docker compose version` |
 
 ### Accounts
 | Service | Required | Purpose |
@@ -56,53 +63,53 @@ Supported Garmin devices (any device that syncs to Garmin Connect):
 ## 2. Project Structure
 
 ```
-fitness-coach/
+ai-coach/
 ├── SETUP.md                          ← this file
+├── README.md
+├── docker-compose.yml                ← production deployment (ARM64)
+├── nginx.conf                        ← reverse proxy config
 ├── backend/
+│   ├── Dockerfile
 │   ├── .env                          ← secrets (never commit)
-│   ├── .garmin_session.pkl           ← cached Garmin session (never commit)
+│   ├── db-data/                      ← bind-mount target for SQLite + Garmin session
 │   ├── requirements.txt
 │   ├── main.py                       ← FastAPI app + all endpoints
 │   ├── config.py                     ← settings singleton
-│   ├── scheduler.py                  ← APScheduler nightly jobs
+│   ├── scheduler.py                  ← APScheduler daily jobs (Asia/Kolkata)
 │   ├── alembic/                      ← DB migrations
 │   │   ├── env.py
 │   │   └── versions/
 │   ├── db/
-│   │   ├── models.py                 ← SQLAlchemy ORM models
+│   │   ├── model.py                  ← SQLAlchemy ORM models
 │   │   ├── writer.py                 ← DB write helpers
 │   │   ├── reader.py                 ← DB read helpers for agents
 │   │   ├── cost_logger.py            ← token usage logging
-│   │   └── feedback_writer.py        ← check-in persistence
+│   │   └── feedback_writer.py        ← check-in + skip session persistence
 │   ├── ingestion/
 │   │   ├── garmin_client.py          ← Garmin Connect API wrapper
 │   │   ├── normaliser.py             ← raw API → DailyMetrics model
 │   │   └── sync.py                   ← CLI sync script
 │   └── agents/
 │       ├── schemas.py                ← ReadinessReport Pydantic schema
-│       ├── plan_schemas.py           ← TrainingPlan Pydantic schema
+│       ├── plan_schemas.py           ← TrainingPlan / TrainingSession schemas
 │       ├── model_router.py           ← OpenRouter / Ollama abstraction
-│       ├── caveman.py                ← prompt token compressor
-│       ├── context.py                ← portable agent state
 │       ├── prompt_builder.py         ← Analysis Agent prompt builder
-│       ├── plan_prompt_builder.py    ← Planning Agent prompt builder
+│       ├── plan_prompt_builder.py    ← Planning + Patch Agent prompt builders
 │       ├── analysis_agent.py         ← Analysis Agent
-│       ├── planning_agent.py         ← Planning Agent
+│       ├── planning_agent.py         ← Planning + Patch Agent
 │       └── orchestrator.py           ← full pipeline runner
 └── frontend/
+    ├── Dockerfile
     ├── .env.local                    ← dev user ID (never commit)
     ├── vite.config.ts                ← dev proxy to :8000
-    ├── tailwind.config.js
     ├── src/
     │   ├── app.css                   ← design tokens + utility classes
-    │   ├── app.html
     │   ├── lib/
-    │   │   ├── types.ts              ← TypeScript types + helpers
+    │   │   ├── types.ts              ← TypeScript interfaces
     │   │   ├── api.ts                ← typed API client
     │   │   ├── stores.ts             ← Svelte stores
     │   │   └── components/
-    │   │       ├── SessionCard.svelte
-    │   │       ├── OverrideModal.svelte
+    │   │       ├── PatchTodayModal.svelte  ← sport + intensity override modal
     │   │       └── charts/
     │   │           ├── LineChart.svelte
     │   │           ├── BarChart.svelte
@@ -110,9 +117,9 @@ fitness-coach/
     │   └── routes/
     │       ├── +layout.svelte        ← sidebar + nav + toasts
     │       ├── +layout.ts            ← ssr: false
-    │       ├── +page.svelte          ← dashboard
+    │       ├── +page.svelte          ← dashboard (plan, today, skip session)
     │       ├── checkin/+page.svelte  ← daily check-in
-    │       ├── stats/+page.svelte    ← KPI charts
+    │       ├── stats/+page.svelte    ← KPI charts + manual workout log
     │       └── settings/+page.svelte ← profile + model config + sync
     └── static/
 ```
@@ -183,7 +190,10 @@ GARMIN_EMAIL=your@email.com
 GARMIN_PASSWORD=yourgarminpassword
 
 # ── Database ───────────────────────────────────────────────────
+# Local dev:
 DATABASE_URL=sqlite:///./db/fitness.db
+# Docker (set automatically by docker-compose.yml):
+# DATABASE_URL=sqlite:////data/fitness.db
 
 # ── OpenRouter (Cloud LLMs) ────────────────────────────────────
 # Get your key at: https://openrouter.ai/keys
@@ -199,6 +209,11 @@ APP_SITE_URL=http://localhost:5173
 LOG_LEVEL=INFO
 MAX_RETRIES=2
 DEFAULT_MAX_TOKENS=2048
+
+# ── Docker / Timezone ──────────────────────────────────────────
+# TZ is set via docker-compose.yml environment block.
+# To change: edit docker-compose.yml → TZ: "Your/Timezone"
+# Example: "America/New_York", "Europe/London", "Asia/Kolkata"
 ```
 
 ### Security Notes
@@ -208,12 +223,14 @@ DEFAULT_MAX_TOKENS=2048
   echo ".env" >> ../.gitignore
   echo ".garmin_session.pkl" >> ../.gitignore
   echo "db/*.db" >> ../.gitignore
+  echo "backend/db-data/" >> ../.gitignore
   echo "frontend/.env.local" >> ../.gitignore
   ```
 - Your Garmin password is stored in plain text in `.env`. This is acceptable
   for a local personal-use tool. Do not host this on a public server.
-- The `.garmin_session.pkl` file stores your Garmin session token. Delete it
-  if you change your Garmin password.
+- The Garmin session token is cached as `.garmin_session.pkl` (local dev) or
+  `/data/.garmin_session.pkl` (Docker). Delete it if you change your Garmin
+  password — the client will re-authenticate automatically.
 
 ### Verifying Config Loads
 
@@ -246,7 +263,11 @@ INFO  [alembic.runtime.migration] Running upgrade <hash> -> <hash>, add_agent_co
 INFO  [alembic.runtime.migration] Running upgrade <hash> -> <hash>, add_readiness_reports
 INFO  [alembic.runtime.migration] Running upgrade <hash> -> <hash>, add_training_plans_feedback
 INFO  [alembic.runtime.migration] Running upgrade <hash> -> <hash>, add_cleared_at_to_plans
+INFO  [alembic.runtime.migration] Running upgrade <hash> -> <hash>, add_workouts_garmin_fields
+INFO  [alembic.runtime.migration] Running upgrade <hash> -> d4e5f6a7b8c9, add_session_skipped_to_feedback
 ```
+
+> **Docker:** `docker compose exec backend alembic upgrade head`
 
 ### 5.3 Verify Tables
 
@@ -273,10 +294,10 @@ Tables created:
   ✓ jobs
   ✓ readiness_reports
   ✓ training_plans
-  ✓ user_feedback
+  ✓ user_feedback      ← includes session_skipped + skip_reason columns
   ✓ users
   ✓ user_profiles
-  ✓ workouts
+  ✓ workouts           ← includes garmin_activity_id, distance_m, duration_min, sport
 ```
 
 ---
@@ -510,11 +531,73 @@ Open the browser and check these pages load without errors:
 
 ---
 
-## 9. Local Model Setup (Free / Zero Cost)
+## 9. Docker Deployment (Raspberry Pi)
+
+The app ships with a `docker-compose.yml` targeting ARM64 (Raspberry Pi 4/5).
+All three services (backend, frontend, nginx) are built from local Dockerfiles.
+
+### Quick start
+
+```bash
+# Build images
+docker compose build
+
+# Start all services
+docker compose up -d
+
+# Check all containers are healthy
+docker compose ps
+
+# Run migrations (first time only)
+docker compose exec backend alembic upgrade head
+
+# Initial Garmin sync (first time only)
+docker compose exec backend python -m ingestion.sync --days 30
+```
+
+The app is available at `http://<pi-ip>` (port 80 via Nginx).
+Backend API is accessible internally at `http://backend:8000` (not exposed to host).
+
+### Volume layout
+
+| Path (container) | Host bind-mount | Contents |
+|---|---|---|
+| `/data/fitness.db` | `./backend/db-data/fitness.db` | SQLite database |
+| `/data/.garmin_session.pkl` | `./backend/db-data/.garmin_session.pkl` | Garmin session token |
+
+Both files persist across `docker compose down` and image rebuilds.
+
+### Updating
+
+```bash
+# Rebuild and restart backend only
+docker compose build backend && docker compose up -d backend
+
+# Rebuild everything
+docker compose build && docker compose up -d
+
+# Apply new migrations after a rebuild
+docker compose exec backend alembic upgrade head
+```
+
+### Timezone
+
+Change the scheduler timezone by editing `docker-compose.yml`:
+
+```yaml
+environment:
+  TZ: "Europe/London"  # or America/New_York, Asia/Tokyo, etc.
+```
+
+Then `docker compose up -d backend` to apply.
+
+---
+
+## 10. Local Model Setup (Free / Zero Cost)
 
 If you want to run entirely free with no API costs, use Ollama.
 
-### 9.1 Install Ollama
+### 10.1 Install Ollama
 
 ```bash
 # macOS
@@ -527,7 +610,7 @@ curl -fsSL https://ollama.com/install.sh | sh
 # Download from https://ollama.com/download
 ```
 
-### 9.2 Start Ollama
+### 10.2 Start Ollama
 
 ```bash
 # Start in background
@@ -543,7 +626,7 @@ curl http://localhost:11434/api/tags
 # Should return {"models": [...]}
 ```
 
-### 9.3 Pull Models
+### 10.3 Pull Models
 
 Choose based on your available RAM:
 
@@ -565,7 +648,7 @@ ollama pull qwen2.5:32b
 ollama pull llama3.3:70b
 ```
 
-### 9.4 Configure in Settings
+### 10.4 Configure in Settings
 
 1. Open http://localhost:5173/settings
 2. Go to **AI Models** section
@@ -574,7 +657,7 @@ ollama pull llama3.3:70b
 5. Click **Save Model Config**
 6. Run the pipeline — context will transfer to the new model automatically
 
-### 9.5 Local Model Performance Notes
+### 10.5 Local Model Performance Notes
 
 - **3b models**: Fast (2–4 min per pipeline run) but may produce malformed JSON.
   The self-healing validator will fix most issues.
@@ -584,19 +667,35 @@ ollama pull llama3.3:70b
 
 ---
 
-## 10. Daily Operations
+## 11. Daily Operations
 
 ### How Automation Works
 
-The scheduler runs two nightly jobs automatically when the backend is running:
+The scheduler (`APScheduler AsyncIOScheduler`) runs jobs automatically when the backend is running.
+The default timezone is **Asia/Kolkata** (IST, UTC+5:30). Change it via `TZ` in `docker-compose.yml`.
 
-| Job | Time (UTC) | What it does |
+| Job | Local time (IST) | What it does |
 |---|---|---|
-| Garmin Sync | 03:00 | Pulls last 3 days of Garmin data |
-| AI Pipeline | 06:00 | Runs Analysis + Planning agents, updates plan |
+| Garmin Sync | 08:30 | Pulls last 3 days of Garmin data |
+| AI Pipeline | 09:00 | Runs Analysis + today's patch agent, updates plan |
 
-If you're in a timezone where UTC 06:00 = morning local time, your plan is
-ready when you wake up.
+The pipeline patches **today's session** based on your readiness and last check-in.
+A full new 2-week plan is only regenerated when the current plan expires.
+
+### Pausing / Resuming the Scheduler
+
+From the dashboard header, or via API:
+
+```bash
+# Pause (e.g. on holiday)
+curl -X POST http://localhost:8000/api/scheduler/pause
+
+# Resume
+curl -X POST http://localhost:8000/api/scheduler/resume
+
+# Check status
+curl http://localhost:8000/api/scheduler/status | python -m json.tool
+```
 
 ### Manual Operations
 
@@ -646,7 +745,7 @@ The override is logged and taken into account in future analysis.
 
 ---
 
-## 11. Resetting Data
+## 12. Resetting Data
 
 ### Option A — Just Re-sync Garmin Data (safest)
 
@@ -707,14 +806,14 @@ Then re-run the pipeline as in Step 7.
 
 ---
 
-## 12. Troubleshooting
+## 13. Troubleshooting
 
 ### Garmin Issues
 
 | Problem | Symptom | Fix |
 |---|---|---|
-| Auth fails on first run | `GarminConnectAuthenticationError` | Check email/password in `.env`. Try logging into garminconnect.com to verify credentials. |
-| Session expired | Error on sync after working before | Delete `.garmin_session.pkl` and retry. The client will re-authenticate. |
+| Auth fails on first run | `GarminConnectAuthenticationError` | Check email/password in `.env`. Try logging into garminconnect.com to verify. |
+| Session expired / 401 loop | Repeated 401 errors on sync | Delete `.garmin_session.pkl` (local) or `backend/db-data/.garmin_session.pkl` (Docker) and retry. The client re-authenticates automatically. |
 | Rate limited | `429 Too Many Requests` | Wait 60 seconds and retry. The client adds 1-second delays between requests. |
 | Missing data | Fields are `null` | Your device may not support that metric (e.g., some Forerunners don't have HRV). This is fine. |
 | Sync shows 0 workouts | `workouts: 0` | Check Garmin Connect app — activities must be synced to the app first. |
@@ -764,7 +863,10 @@ Then re-run the pipeline as in Step 7.
 | Agent returns invalid JSON | Validation error after retries | Check server logs for the raw LLM output. Add `"Output ONLY JSON"` to system prompt. |
 | Pipeline times out | No response after 3 minutes | Increase `DEFAULT_MAX_TOKENS` or switch to a faster model (Gemini Flash). |
 | Readiness score always 50 | Suspiciously average scores | Likely insufficient data. Check `daily_metrics` has 14+ rows with non-null HRV/sleep. |
-| Plan has fewer than 14 sessions | Validation error | The validator auto-fills missing days with REST sessions. Check `core/validator.py`. |
+| Plan has fewer than 14 sessions | Validation error | The orchestrator auto-fills missing days with REST sessions. |
+| Plan patches feel too verbose | Long AI descriptions after updates | The patch prompt includes "BE CONCISE". If verbosity returns, re-run the pipeline (context injection is intentionally disabled for patches). |
+| Plan not updating today | Scheduler patches tomorrow instead | Ensure `patch_target="today"` is passed. The scheduler always passes this explicitly. |
+| StrengthExercise / SwimSet crash | Pydantic validation error on plan parse | Schemas include `extra="ignore"` and safe defaults. If a crash occurs, check for a completely malformed LLM response and re-run. |
 
 ### Port Already in Use
 
@@ -779,81 +881,98 @@ PYTHONPATH=. uvicorn main:app --port 8001
 
 ---
 
-## 13. Architecture Overview
+## 14. Architecture Overview
 
 ### Data Flow
 
 ```
 Garmin Connect API
        │
-       ▼ (python-garminconnect, nightly 03:00 UTC)
+       ▼ (garminconnect, daily ~08:30 IST)
 Ingestion Service
-  └── Normaliser → DailyMetrics
+  └── Normaliser → DailyMetrics + Workouts
        │
        ▼
-  SQLite Database
+  SQLite Database  (/data/fitness.db in Docker)
   ├── daily_metrics
-  ├── workouts
-  └── user_feedback (check-ins)
+  ├── workouts          ← Garmin + manual workouts
+  └── user_feedback     ← check-ins + session_skipped + skip_reason
        │
-       ▼ (nightly 06:00 UTC)
+       ▼ (daily ~09:00 IST)
 Agent Orchestrator
        │
        ├──► Analysis Agent (Claude / Ollama)
-       │      Input:  14d metrics + feedback + profile
+       │      Input:  14d metrics + recent feedback + profile
        │      Output: ReadinessReport JSON
        │              (score, gate, HRV, sleep, ACWR signals)
        │
-       └──► Planning Agent (Claude / Gemini / Ollama)
-              Input:  ReadinessReport + profile + history
-              Output: TrainingPlan JSON
-                      (14 sessions + nutrition + rationale)
+       └──► Planning Agent (Claude / Ollama)
+              Input:  ReadinessReport + profile + recent feedback
+              │       + skipped sessions history
+              Output: TrainingPlan JSON (14 sessions, nutrition)
+              │         OR today's session patch only
+              │
+              ▼ Manual triggers
+       Patch Today / Patch Tomorrow
+       (sport override + intensity override + skip context)
                         │
                         ▼
                   SQLite Database
                   ├── readiness_reports
-                  ├── training_plans
-                  └── agent_context
+                  └── training_plans
                         │
                         ▼
-                  SvelteKit Frontend
-                  ├── Dashboard (plan + today's session)
-                  ├── KPI Stats (charts + trends)
-                  ├── Check-in (RPE + mood + override)
-                  └── Settings (profile + model config)
+                  SvelteKit Frontend (via Nginx)
+                  ├── Dashboard   — today's session, 2-week plan,
+                  │                 skip session, sport/intensity override
+                  ├── Stats       — KPI charts, distance progression,
+                  │                 manual workout log
+                  ├── Check-in    — RPE + mood + notes
+                  └── Settings    — profile, model config, sync
 ```
 
 ### Key Design Decisions
 
 **Why 2 agents instead of 10?**
-The original architecture diagram showed 6 analysis sub-agents (Marcus, Elena,
-Aiden, Kwame, Maya, Alex). Each was doing what a single well-prompted agent with
-structured tool calls handles natively. 2 agents = simpler, faster, cheaper.
+One well-prompted agent with structured output handles what 6 sub-agents would
+do. 2 agents = simpler, faster, cheaper.
 
 **Why SQLite instead of PostgreSQL?**
 One user, daily metrics. SQLite handles this indefinitely. Swap by changing
-one SQLAlchemy connection string when going multi-user.
+one SQLAlchemy connection string when going multi-user. Alembic migrations use
+`render_as_batch=True` for SQLite-safe schema changes.
 
 **Why not use the Garmin Connect MCP server?**
 `garmin-connect-mcp` is great for Claude Desktop interactive queries. For a
-scheduled pipeline that runs at 03:00, you need direct API control over rate
-limiting, session caching, and error handling. Use `python-garminconnect` directly.
+scheduled pipeline, you need direct API control over rate limiting, session
+caching, and error handling. `python-garminconnect` is used directly.
 
-**What is Caveman?**
-A token compression layer that reduces prompt size by 40–60% before sending to
-the LLM. Fitness data contains lots of repeated field names and verbose JSON —
-Caveman strips filler phrases, abbreviates fitness terms (e.g., "heart rate
-variability" → "hrv"), and compacts JSON whitespace.
+**How does the skip session feature work?**
+When a user marks a session as skipped, `session_skipped=True` and an optional
+`skip_reason` are stored in `user_feedback`. The consistency score excludes
+skipped sessions from the denominator (excused misses). All 3 prompt builders
+include recent feedback (with skip status) so the AI adjusts future load:
+1 skip → no change; 2–3 skips → −15% volume; 4+ skips → rebuilding week.
 
-**How does model switching work?**
-All agent state is serialised to a `ConversationContext` object and stored in
-the `agent_context` table. When you switch models in Settings, the next pipeline
-run injects the prior context as a system prompt prefix, giving the new model
-full awareness of past analysis.
+**Why is context injection disabled for patches?**
+Injecting prior `AgentContext` into patch calls caused the LLM to escalate
+verbosity on each repeated pipeline run. Patches are now stateless — they
+only receive today's readiness, the current plan JSON, and recent feedback.
+
+**How does per-user model config work?**
+Each `UserProfile` stores `model_planning` and `model_analysis` fields.
+The Settings page lets you switch models independently for each agent.
+Changes take effect on the next pipeline run.
 
 ---
 
-## 14. API Reference
+## 15. API Reference
+
+### Health
+
+| Method | Endpoint | Description |
+|---|---|---|
+| GET | `/health` | Service health check |
 
 ### Health
 
@@ -871,6 +990,21 @@ full awareness of past analysis.
 | GET | `/api/plans/override-prompt/{user_id}` | Should push/rest UI show? |
 | DELETE | `/api/plans/current/{user_id}` | Deactivate current plan |
 
+### Sessions (patch + skip)
+
+| Method | Endpoint | Description |
+|---|---|---|
+| POST | `/api/sessions/patch-today` | Patch today's session (intensity + sport override) |
+| POST | `/api/sessions/patch-tomorrow` | Patch tomorrow's session |
+| POST | `/api/sessions/skip` | Mark a session as skipped with optional reason |
+| DELETE | `/api/sessions/skip` | Un-skip a session |
+
+### Workouts
+
+| Method | Endpoint | Description |
+|---|---|---|
+| POST | `/api/workouts/manual` | Log a manual workout (yoga, strength, etc.) |
+
 ### Analysis
 
 | Method | Endpoint | Description |
@@ -883,7 +1017,7 @@ full awareness of past analysis.
 
 | Method | Endpoint | Description |
 |---|---|---|
-| POST | `/api/pipeline/run` | Run full pipeline (analysis + planning) |
+| POST | `/api/pipeline/run` | Full pipeline: Garmin sync → readiness → plan patch |
 
 ### Check-in
 
@@ -905,14 +1039,16 @@ full awareness of past analysis.
 
 | Method | Endpoint | Description |
 |---|---|---|
-| GET | `/api/metrics/kpi/{user_id}` | KPI data for charts (14d) |
-| GET | `/api/metrics/goal/{user_id}` | Goal progress + phase |
+| GET | `/api/metrics/kpi/{user_id}` | KPI time-series (HRV, sleep, ACWR, weekly distance) |
+| GET | `/api/metrics/goals/{user_id}` | Goal progress + consistency score |
 
 ### Scheduler
 
 | Method | Endpoint | Description |
 |---|---|---|
-| GET | `/api/scheduler/status` | Job schedule + next run times |
+| GET | `/api/scheduler/status` | Job schedule + next run times + pause state |
+| POST | `/api/scheduler/pause` | Pause the daily scheduler |
+| POST | `/api/scheduler/resume` | Resume the daily scheduler |
 | POST | `/api/scheduler/trigger/sync` | Manually trigger Garmin sync |
 | POST | `/api/scheduler/trigger/pipeline` | Manually trigger pipeline |
 
@@ -927,7 +1063,7 @@ full awareness of past analysis.
 
 ---
 
-## 15. Cost Estimates
+## 16. Cost Estimates
 
 ### Cloud Models (OpenRouter)
 
@@ -964,7 +1100,13 @@ full awareness of past analysis.
 ## Quick Reference Card
 
 ```bash
-# ── Start everything ──────────────────────────────────────────
+# ── Docker (production) ───────────────────────────────────────
+docker compose up -d
+docker compose exec backend alembic upgrade head
+docker compose exec backend python -m ingestion.sync --days 30
+curl http://localhost/health
+
+# ── Local dev ─────────────────────────────────────────────────
 cd backend && source .venv/bin/activate
 PYTHONPATH=. uvicorn main:app --reload --port 8000 &
 cd frontend && npm run dev &
@@ -972,7 +1114,7 @@ cd frontend && npm run dev &
 # ── Get your user ID ──────────────────────────────────────────
 python -c "import sqlite3; print(sqlite3.connect('backend/db/fitness.db').execute('SELECT id FROM users LIMIT 1').fetchone()[0])"
 
-# ── Manual sync ───────────────────────────────────────────────
+# ── Manual Garmin sync ────────────────────────────────────────
 python -m ingestion.sync --email your@email.com --days 7
 
 # ── Manual pipeline ───────────────────────────────────────────
@@ -980,9 +1122,28 @@ curl -X POST http://localhost:8000/api/pipeline/run \
   -H "Content-Type: application/json" \
   -d '{"user_id": "USER-ID"}'
 
+# ── Patch today with sport override ───────────────────────────
+curl -X POST http://localhost:8000/api/sessions/patch-today \
+  -H "Content-Type: application/json" \
+  -d '{"user_id": "USER-ID", "sport_override": "swim"}'
+
+# ── Mark session as skipped ───────────────────────────────────
+curl -X POST http://localhost:8000/api/sessions/skip \
+  -H "Content-Type: application/json" \
+  -d '{"user_id": "USER-ID", "session_date": "2026-05-28", "skip_reason": "Travel"}'
+
+# ── Log manual workout ────────────────────────────────────────
+curl -X POST http://localhost:8000/api/workouts/manual \
+  -H "Content-Type: application/json" \
+  -d '{"user_id": "USER-ID", "date": "2026-05-28", "sport": "yoga", "duration_min": 45}'
+
+# ── Pause / resume scheduler ──────────────────────────────────
+curl -X POST http://localhost:8000/api/scheduler/pause
+curl -X POST http://localhost:8000/api/scheduler/resume
+
 # ── Check everything is working ───────────────────────────────
 curl http://localhost:8000/health
-curl http://localhost:8000/api/scheduler/status
+curl http://localhost:8000/api/scheduler/status | python -m json.tool
 
 # ── Clear Garmin data and re-sync ─────────────────────────────
 python -c "
@@ -999,5 +1160,5 @@ python -m ingestion.sync --email your@email.com --days 30
 
 ---
 
-*FitCoach AI — Days 1–6 Implementation*
-*Built with: FastAPI · SQLAlchemy · garminconnect · Anthropic Claude · OpenRouter · SvelteKit · Chart.js*
+*AI Fitness Coach — Last updated May 2026*
+*Built with: FastAPI · SQLAlchemy · garminconnect · Anthropic Claude · OpenRouter · SvelteKit · Chart.js · Docker · Nginx*
