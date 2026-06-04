@@ -210,10 +210,15 @@ class PlanningAgent:
             (s for s in current_plan_dict.get("sessions", []) if s.get("date") == target_date_str),
             None,
         )
+        existing_is_rest = (
+            existing_target is not None
+            and existing_target.get("sport", "").lower() == "rest"
+        )
         if (
             readiness_report.training_gate == TrainingGate.PROCEED
             and override_choice is None
             and existing_target is not None
+            and not existing_is_rest  # always patch if today is REST but gate says PROCEED
             and patch_target == "today"  # never skip explicit "Update Tomorrow" requests
         ):
             logger.info(

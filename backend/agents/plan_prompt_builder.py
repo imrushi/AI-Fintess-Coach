@@ -16,6 +16,63 @@ from sqlalchemy import select
 
 log = logging.getLogger(__name__)
 
+
+def resolve_auto_sport(user_id: str, current_plan_json: dict | None = None) -> str:
+    """Pick the best sport for today based on training balance.
+
+    Logic:
+    1. Determine active sports from user profile (those with km_week set > 0).
+    2. Count sessions of each active sport in the last 7 days (workouts table).
+    3. Also count upcoming sessions in the current plan (next 6 days) per sport.
+    4. Return the active sport with the fewest combined recent + upcoming sessions.
+       Ties broken by fixed priority: swim > run > bike > yoga > strength.
+    Falls back to "swim" if no profile data available.
+    """
+    profile = get_user_profile(user_id) or {}
+    today = date.today()
+
+    # Determine which triathlon sports are active for this athlete
+    active_sports: list[str] = []
+    if profile.get("current_swim_km_week"):
+        active_sports.append("swim")
+    if profile.get("current_run_km_week"):
+        active_sports.append("run")
+    if profile.get("current_bike_km_week"):
+        active_sports.append("bike")
+    # Include cross-training if no triathlon sports
+    if not active_sports:
+        active_sports = ["yoga", "strength", "run"]
+
+    # Count recent workouts (last 7 days) per sport
+    recent = get_recent_workouts(user_id, days=7)
+    recent_counts: dict[str, int] = {s: 0 for s in active_sports}
+    for w in recent:
+        sport = (w.get("sport") or "").lower()
+        if sport in recent_counts:
+            recent_counts[sport] += 1
+
+    # Count upcoming planned sessions (today+1 through today+6) per sport
+    upcoming_counts: dict[str, int] = {s: 0 for s in active_sports}
+    if current_plan_json:
+        for session in current_plan_json.get("sessions", []):
+            try:
+                session_date = date.fromisoformat(session.get("date", ""))
+            except ValueError:
+                continue
+            if today < session_date <= today + timedelta(days=6):
+                sport = (session.get("sport") or "").lower()
+                if sport in upcoming_counts:
+                    upcoming_counts[sport] += 1
+
+    # Combined score — lower = needs more attention
+    combined = {s: recent_counts[s] + upcoming_counts[s] for s in active_sports}
+    best = min(active_sports, key=lambda s: combined[s])
+    log.info(
+        "Auto sport for %s → %s (recent=%s upcoming=%s)",
+        user_id, best, recent_counts, upcoming_counts,
+    )
+    return best
+
 PLAN_SYSTEM_PROMPT = """\
 You are a world-class endurance coach specialising in triathlon (Ironman, 70.3), \
 marathon, and multi-sport training. You write 7-day rolling training plans.
@@ -437,9 +494,14 @@ def build_daily_patch_prompt(
         sections.append("## Override: REST confirmed. Apply MANDATORY_REST rules.")
 
     if sport_override:
+        if sport_override == "auto":
+            sport_override = resolve_auto_sport(user_id, current_plan_json)
+            auto_note = " (auto-selected based on training balance)"
+        else:
+            auto_note = ""
         sport_label = sport_override.replace("custom:", "").strip()
         sections.append(
-            f"## Sport Override (MANDATORY)\n"
+            f"## Sport Override (MANDATORY){auto_note}\n"
             f"User cannot do the originally planned sport tomorrow. "
             f"Change the session sport to: {sport_label}. "
             f"Redesign the workout appropriately for {sport_label} while keeping the same training stimulus and duration. "
@@ -469,7 +531,9 @@ def build_daily_patch_prompt(
     sections.append(
         f"## Task\n"
         f"Update ONLY tomorrow's session: {tomorrow_str} ({tomorrow_dow}).\n"
-        f"If the existing session already satisfies the gate rules and no flags require adjustment, "
+        f"If the existing session is REST but the gate is PROCEED or PROCEED_WITH_CAUTION, "
+        f"REPLACE it with a real training session — do NOT return no_change.\n"
+        f"If the existing session already satisfies the gate rules, is NOT a REST day, and no flags require adjustment, "
         f"respond with exactly: {{\"no_change\": true}}\n"
         f"Otherwise output a single TrainingSession JSON object. "
         f"Set readiness_adjusted=true if you changed the session due to gate/flags.\n"
@@ -575,9 +639,14 @@ def build_today_patch_prompt(
         sections.append("## Override: REST confirmed. Apply MANDATORY_REST rules.")
 
     if sport_override:
+        if sport_override == "auto":
+            sport_override = resolve_auto_sport(user_id, current_plan_json)
+            auto_note = " (auto-selected based on training balance)"
+        else:
+            auto_note = ""
         sport_label = sport_override.replace("custom:", "").strip()
         sections.append(
-            f"## Sport Override (MANDATORY)\n"
+            f"## Sport Override (MANDATORY){auto_note}\n"
             f"User cannot do the originally planned sport today. "
             f"Change the session sport to: {sport_label}. "
             f"Redesign the workout appropriately for {sport_label} while keeping the same training stimulus and duration. "
@@ -604,6 +673,8 @@ def build_today_patch_prompt(
         f"## Task\n"
         f"Generate an updated session for TODAY ({today_str}, {today_dow}).\n"
         f"Apply the readiness gate and user intensity preference.\n"
+        f"If the current session is REST but the gate is PROCEED or PROCEED_WITH_CAUTION, "
+        f"REPLACE it with a real training session appropriate for this athlete — do NOT keep it as REST.\n"
         f"Output ONLY the single session JSON object."
     )
 

@@ -72,6 +72,7 @@
     emoji: string;
   }> = [
     { value: null, label: "As planned", emoji: "📋" },
+    { value: "auto", label: "Auto", emoji: "🤖" },
     { value: "swim", label: "Swim", emoji: "🏊" },
     { value: "run", label: "Run", emoji: "🏃" },
     { value: "bike", label: "Bike", emoji: "🚴" },
@@ -203,6 +204,12 @@
             bind:value={customSportName}
             class="w-full bg-slate-700 border border-slate-600 rounded-lg px-3 py-2 text-sm text-slate-200 mt-1"
           />
+        {/if}
+        {#if selectedSport === "auto"}
+          <p class="text-xs text-slate-500 mt-1">
+            AI picks the sport you've trained least this week — balances swim /
+            run / bike automatically.
+          </p>
         {/if}
       </div>
 
