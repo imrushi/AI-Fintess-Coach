@@ -45,6 +45,7 @@
   let syncTriggering = $state(false);
   let pipelineTriggering = $state(false);
   let activeSection = $state<string>("profile");
+  let customGoalText = $state("");
 
   // ── Toast ─────────────────────────────────────────────────────────────
   let toast = $state<{ message: string; kind: "success" | "error" } | null>(
@@ -137,9 +138,11 @@
       profile = p;
       userProfile.set(p);
       schedulerStatus = s;
+      const knownGoalValues = ["", "ironman_703", "ironman", "marathon", "half_marathon", "olympic_tri", "sprint_tri"];
+      const isCustomGoal = !!p.goal_event && !knownGoalValues.includes(p.goal_event);
       const f = {
         display_name: p.display_name ?? "",
-        goal_event: p.goal_event ?? "",
+        goal_event: isCustomGoal ? "custom" : (p.goal_event ?? ""),
         goal_date: p.goal_date ?? "",
         fitness_level: p.fitness_level ?? "",
         medical_conditions: Array.isArray(p.medical_conditions)
@@ -167,6 +170,7 @@
         model_planning: p.model_planning ?? "",
       };
       form = { ...f };
+      customGoalText = isCustomGoal ? (p.goal_event ?? "") : "";
       savedFormJson = JSON.stringify(f);
     } catch (e: unknown) {
       showToast(
@@ -185,7 +189,9 @@
     try {
       const updated = await updateProfile($userId, {
         display_name: form.display_name || null,
-        goal_event: form.goal_event || null,
+        goal_event: form.goal_event === "custom"
+          ? (customGoalText.trim() || null)
+          : (form.goal_event || null),
         goal_date: form.goal_date || null,
         fitness_level: form.fitness_level || null,
         medical_conditions: form.medical_conditions
@@ -490,6 +496,14 @@
                   <option value={opt.value}>{opt.label}</option>
                 {/each}
               </select>
+              {#if form.goal_event === 'custom'}
+                <input
+                  type="text"
+                  bind:value={customGoalText}
+                  placeholder="Describe your goal (e.g. 50km trail race)"
+                  class="input-field mt-2"
+                />
+              {/if}
             </div>
 
             <!-- Goal Date -->
