@@ -9,6 +9,7 @@ from datetime import date
 from uuid import uuid4
 
 from agents.analysis_agent import AnalysisAgent, AnalysisResult
+from agents.fitness_level_evaluator import check_and_update_fitness_level
 from agents.planning_agent import PlanningAgent, PlanningResult
 from agents.schemas import ReadinessReport
 from db.model import Job, TrainingPlanRow, get_session
@@ -205,6 +206,24 @@ class AgentOrchestrator:
             planning = await self.run_planning(user_id, report, override_choice)
 
         result.planning_result = planning.planning_result
+
+        # Auto-adjust fitness level after planning; re-patch if changed
+        try:
+            new_level, reason = check_and_update_fitness_level(user_id)
+            if new_level is not None:
+                logger.info("Fitness level changed to %s for %s — re-patching plan", new_level, user_id)
+                with get_session() as s:
+                    repatch_row = s.execute(
+                        select(TrainingPlanRow).where(
+                            TrainingPlanRow.user_id == user_id,
+                            TrainingPlanRow.is_current == True,  # noqa: E712
+                        )
+                    ).scalar_one_or_none()
+                    repatch_json = repatch_row.plan_json if repatch_row else None
+                if repatch_json:
+                    await self.run_planning_patch(user_id, report, repatch_json, override_choice, patch_target, sport_override)
+        except Exception:
+            logger.exception("Fitness level auto-adjust failed for %s — continuing", user_id)
 
         logger.info("Full pipeline complete for %s", user_id)
         return result

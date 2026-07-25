@@ -10,6 +10,7 @@
   import {
     getProfile,
     updateProfile,
+    getFitnessLevelHistory,
     getSchedulerStatus,
     pauseScheduler,
     resumeScheduler,
@@ -18,7 +19,7 @@
     clearCurrentPlan,
     resetAllData,
   } from "$lib/api";
-  import type { SchedulerStatus, UserProfile } from "$lib/types";
+  import type { FitnessLevelHistoryItem, SchedulerStatus, UserProfile } from "$lib/types";
   import {
     User,
     Target,
@@ -66,6 +67,7 @@
     goal_event: "",
     goal_date: "",
     fitness_level: "",
+    fitness_level_locked: true,
     medical_conditions: "",
     dietary_preference: "",
     dietary_allergies: "",
@@ -96,6 +98,8 @@
       form.model_planning !== (profile.model_planning ?? "")
     );
   });
+
+  let fitnessHistory = $state<FitnessLevelHistoryItem[]>([]);
 
   // ── Danger zone confirm state ─────────────────────────────────────────
   let clearPlanConfirming = $state(false);
@@ -131,10 +135,12 @@
       return;
     }
     try {
-      const [p, s] = await Promise.all([
+      const [p, s, hist] = await Promise.all([
         getProfile(uid),
         getSchedulerStatus().catch(() => null),
+        getFitnessLevelHistory(uid, 10).catch(() => []),
       ]);
+      fitnessHistory = hist;
       profile = p;
       userProfile.set(p);
       schedulerStatus = s;
@@ -145,6 +151,7 @@
         goal_event: isCustomGoal ? "custom" : (p.goal_event ?? ""),
         goal_date: p.goal_date ?? "",
         fitness_level: p.fitness_level ?? "",
+        fitness_level_locked: p.fitness_level_locked ?? true,
         medical_conditions: Array.isArray(p.medical_conditions)
           ? p.medical_conditions.join(", ")
           : ((p.medical_conditions as unknown as string) ?? ""),
@@ -194,6 +201,7 @@
           : (form.goal_event || null),
         goal_date: form.goal_date || null,
         fitness_level: form.fitness_level || null,
+        fitness_level_locked: form.fitness_level_locked,
         medical_conditions: form.medical_conditions
           ? form.medical_conditions
               .split(",")
@@ -657,13 +665,35 @@
           </div>
 
           <!-- Fitness Level segmented control -->
-          <div class="space-y-2">
-            <p class="label-sm">Fitness Level</p>
+          <div class="space-y-3">
+            <div class="flex items-center justify-between">
+              <p class="label-sm">Fitness Level</p>
+              <label class="flex items-center gap-2 cursor-pointer select-none">
+                <span class="text-xs text-slate-400">Auto-adjust</span>
+                <button
+                  type="button"
+                  role="switch"
+                  aria-checked={!form.fitness_level_locked}
+                  onclick={() => { form.fitness_level_locked = !form.fitness_level_locked; }}
+                  class="relative inline-flex h-5 w-9 items-center rounded-full transition-colors focus:outline-none
+                         {!form.fitness_level_locked ? 'bg-blue-600' : 'bg-slate-600'}"
+                >
+                  <span
+                    class="inline-block h-3.5 w-3.5 transform rounded-full bg-white transition-transform
+                           {!form.fitness_level_locked ? 'translate-x-4' : 'translate-x-1'}"
+                  ></span>
+                </button>
+              </label>
+            </div>
+            {#if !form.fitness_level_locked}
+              <p class="text-xs text-slate-400">Level will adjust automatically based on your 4-week completion rate. Toggle off to set manually.</p>
+            {/if}
             <div class="flex gap-2">
               {#each ["beginner", "intermediate", "advanced"] as level}
                 <button
                   onclick={() => {
                     form.fitness_level = level;
+                    form.fitness_level_locked = true;
                   }}
                   class="flex-1 py-2 rounded-lg text-sm font-medium capitalize transition-colors border
                          {form.fitness_level === level
@@ -673,6 +703,23 @@
                 >
               {/each}
             </div>
+            {#if fitnessHistory.length > 0}
+              <div class="mt-2 space-y-1">
+                <p class="text-xs font-medium text-slate-400 uppercase tracking-wide">Level History</p>
+                {#each fitnessHistory as entry}
+                  <div class="flex items-start gap-2 text-xs text-slate-400">
+                    <span class="shrink-0 text-slate-500">{new Date(entry.created_at).toLocaleDateString()}</span>
+                    <span>
+                      {entry.source === "auto" ? "Auto" : "Manual"}:
+                      {entry.old_level ?? "—"} → <span class="text-slate-200 font-medium">{entry.new_level}</span>
+                      {#if entry.reason}
+                        <span class="text-slate-500"> · {entry.reason}</span>
+                      {/if}
+                    </span>
+                  </div>
+                {/each}
+              </div>
+            {/if}
           </div>
 
           <!-- Medical Conditions -->

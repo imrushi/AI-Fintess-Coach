@@ -87,6 +87,7 @@ class UserProfile(Base):
     )
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_utcnow)
     goal_start_override: Mapped[date | None] = mapped_column(Date, nullable=True)
+    fitness_level_locked: Mapped[bool] = mapped_column(Boolean, default=False, server_default="0")
 
     user: Mapped["User"] = relationship(back_populates="profile")
 
@@ -257,6 +258,20 @@ class TrainingPlanRow(Base):
     tokens_out: Mapped[int] = mapped_column(Integer, default=0)
     is_current: Mapped[bool] = mapped_column(Boolean, default=False)
     cleared_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_utcnow)
+
+
+# ── Fitness Level History ─────────────────────────────────────────────────
+
+class FitnessLevelHistory(Base):
+    __tablename__ = "fitness_level_history"
+
+    id: Mapped[str] = mapped_column(String, primary_key=True, default=_uuid)
+    user_id: Mapped[str] = mapped_column(String, ForeignKey("users.id"), nullable=False)
+    old_level: Mapped[str | None] = mapped_column(String, nullable=True)
+    new_level: Mapped[str] = mapped_column(String, nullable=False)
+    reason: Mapped[str | None] = mapped_column(String, nullable=True)
+    source: Mapped[str] = mapped_column(String, default="auto")  # "auto" | "manual"
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_utcnow)
 
 

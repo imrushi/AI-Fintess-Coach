@@ -142,12 +142,22 @@ export interface OverridePrompt {
   decision: string | null
 }
 
+export interface FitnessLevelHistoryItem {
+  id: string
+  old_level: string | null
+  new_level: string
+  reason: string | null
+  source: string
+  created_at: string
+}
+
 export interface UserProfile {
   user_id: string
   display_name: string | null
   goal_event: string | null
   goal_date: string | null
   fitness_level: string | null
+  fitness_level_locked: boolean
   medical_conditions: string[]
   dietary_preference: string | null
   dietary_allergies: string | null
@@ -160,6 +170,7 @@ export interface UserProfile {
   current_swim_km_week: number | null
   current_bike_km_week: number | null
   current_run_km_week: number | null
+  swim_max_session_min: number | null
   model_analysis: string
   model_planning: string
 }

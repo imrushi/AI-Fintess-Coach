@@ -20,6 +20,7 @@ from db.model import (
     AgentRun,
     Base,
     DailyMetric,
+    FitnessLevelHistory,
     Job,
     ReadinessReportRow,
     TrainingPlanRow,
@@ -81,6 +82,7 @@ def _profile_to_dict(p: UserProfile) -> dict:
         "goal_event": p.goal_event,
         "goal_date": str(p.goal_date) if p.goal_date else None,
         "fitness_level": p.fitness_level,
+        "fitness_level_locked": p.fitness_level_locked,
         "medical_conditions": p.medical_conditions,
         "dietary_preference": p.dietary_preference,
         "dietary_allergies": p.dietary_allergies,
@@ -108,6 +110,7 @@ class UpdateProfileRequest(BaseModel):
     goal_event: str | None = None
     goal_date: date | None = None
     fitness_level: str | None = None
+    fitness_level_locked: bool | None = None
     medical_conditions: list[str] | str | None = None
     dietary_preference: str | None = None
     dietary_allergies: str | None = None
@@ -312,6 +315,9 @@ def update_profile(user_id: str, body: UpdateProfileRequest):
         if not profile:
             raise HTTPException(status_code=404, detail="Profile not found")
         updates = body.model_dump(exclude_unset=True)
+        # Manual fitness_level selection auto-locks if caller didn't explicitly set locked
+        if "fitness_level" in updates and "fitness_level_locked" not in updates:
+            updates["fitness_level_locked"] = True
         for field, value in updates.items():
             # Coerce list → comma-separated string for DB text columns
             if isinstance(value, list):
@@ -360,6 +366,28 @@ def reset_goal_progress(user_id: str):
         profile.updated_at = datetime.now(timezone.utc)
         session.flush()
     return {"reset": True, "goal_start_override": str(date.today())}
+
+
+@app.get("/api/profile/{user_id}/fitness-history")
+def get_fitness_history(user_id: str, limit: int = Query(default=10, le=50)):
+    with get_session() as session:
+        rows = session.execute(
+            select(FitnessLevelHistory)
+            .where(FitnessLevelHistory.user_id == user_id)
+            .order_by(FitnessLevelHistory.created_at.desc())
+            .limit(limit)
+        ).scalars().all()
+        return [
+            {
+                "id": r.id,
+                "old_level": r.old_level,
+                "new_level": r.new_level,
+                "reason": r.reason,
+                "source": r.source,
+                "created_at": r.created_at.isoformat() if r.created_at else None,
+            }
+            for r in rows
+        ]
 
 
 @app.get("/api/costs/{user_id}")
@@ -1249,10 +1277,8 @@ def get_goal_metrics(user_id: str):
             if str(cutoff_2w) <= s.get("date", "") <= str(today)
             and s.get("sport") != "rest"
         ]
-        # Excused skips: remove from denominator (life happens, not athlete's fault)
-        planned_excused = [s for s in planned if s.get("date") not in skipped_dates]
-        planned_count = len(planned_excused)
-        completed_count = len({s["date"] for s in planned_excused} & workout_dates)
+        planned_count = len(planned)
+        completed_count = len({s["date"] for s in planned} & workout_dates)
         recent_consistency = (
             round(completed_count / planned_count * 100, 1) if planned_count else 100.0
         )

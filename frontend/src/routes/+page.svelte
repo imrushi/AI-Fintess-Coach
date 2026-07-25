@@ -38,6 +38,7 @@
     submitCheckIn,
     triggerSync,
     getKpiMetrics,
+    getFitnessLevelHistory,
     patchTodaySession,
     skipSession,
     unskipSession,
@@ -51,6 +52,8 @@
   let syncStarted = $state(false);
   let syncLoading = $state(false);
 
+  const FITNESS_LEVEL_ACK_KEY = 'ack_fitness_level_history_id';
+
   onMount(async () => {
     if (!$userId) return;
     try {
@@ -60,6 +63,23 @@
         (kpi.workouts_14d?.length ?? 0) > 0;
     } catch {
       // no data yet — keep false
+    }
+
+    // Check for auto fitness level change today
+    try {
+      const history = await getFitnessLevelHistory($userId, 1);
+      const latest = history[0];
+      if (latest && latest.source === 'auto') {
+        const todayStr = new Date().toISOString().split('T')[0];
+        const entryDate = latest.created_at.split('T')[0];
+        const ackedId = localStorage.getItem(FITNESS_LEVEL_ACK_KEY);
+        if (entryDate === todayStr && ackedId !== latest.id) {
+          addToast(`Fitness level auto-adjusted: ${latest.old_level ?? '—'} → ${latest.new_level}`, 'info');
+          localStorage.setItem(FITNESS_LEVEL_ACK_KEY, latest.id);
+        }
+      }
+    } catch {
+      // non-critical
     }
   });
 
@@ -1508,7 +1528,7 @@
       </h2>
       <p class="text-sm text-slate-400">
         Optional: why couldn't you do it? The AI coach will account for this in
-        planning.
+        planning. This will count against your consistency score.
       </p>
       <div class="flex flex-wrap gap-2">
         {#each ["Pool closed", "Travel", "Illness", "Injury", "Work", "Tired"] as preset}

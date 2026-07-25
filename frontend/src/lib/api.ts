@@ -1,6 +1,7 @@
 import type {
   CheckInRequest,
   CheckInResponse,
+  FitnessLevelHistoryItem,
   GoalProgress,
   KpiMetrics,
   OverridePrompt,
@@ -223,6 +224,10 @@ export async function updateProfile(userId: string, data: Partial<UserProfile>):
     method: 'PUT',
     body: JSON.stringify(data),
   })
+}
+
+export async function getFitnessLevelHistory(userId: string, limit = 10): Promise<FitnessLevelHistoryItem[]> {
+  return apiFetch(`/profile/${userId}/fitness-history?limit=${limit}`)
 }
 
 // ── KPI Metrics ───────────────────────────────────────────────────────────
