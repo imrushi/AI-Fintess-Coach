@@ -350,6 +350,18 @@ def update_model_config(user_id: str, body: ModelConfigRequest):
         return {"updated": True, "context_transfer_required": changed}
 
 
+@app.post("/api/users/{user_id}/reset-progress")
+def reset_goal_progress(user_id: str):
+    with get_session() as session:
+        profile = session.get(UserProfile, user_id)
+        if not profile:
+            raise HTTPException(status_code=404, detail="Profile not found")
+        profile.goal_start_override = date.today()
+        profile.updated_at = datetime.now(timezone.utc)
+        session.flush()
+    return {"reset": True, "goal_start_override": str(date.today())}
+
+
 @app.get("/api/costs/{user_id}")
 def get_costs(user_id: str):
     return get_cost_summary(user_id, days=7)
@@ -1142,6 +1154,7 @@ def get_goal_metrics(user_id: str):
         goal_event = profile.goal_event
         goal_date_val = profile.goal_date
         max_weekly_hours = profile.max_weekly_hours
+        goal_start_override = profile.goal_start_override
 
         plan_row = session.execute(
             select(TrainingPlanRow).where(
@@ -1207,8 +1220,11 @@ def get_goal_metrics(user_id: str):
     phase, phase_description = _compute_phase(weeks_to_goal)
 
     # ── Completion % ──────────────────────────────────────────────────
-    if earliest_plan_start and goal_date_val:
-        plan_start = date.fromisoformat(earliest_plan_start)
+    effective_start = goal_start_override or (
+        date.fromisoformat(earliest_plan_start) if earliest_plan_start else None
+    )
+    if effective_start and goal_date_val:
+        plan_start = effective_start
         total_days = (goal_date_val - plan_start).days
         elapsed = (today - plan_start).days
         completion_pct = (

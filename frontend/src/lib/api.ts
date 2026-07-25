@@ -235,6 +235,10 @@ export async function getGoalProgress(userId: string): Promise<GoalProgress> {
   return apiFetch(`/metrics/goal/${userId}`)
 }
 
+export async function resetGoalProgress(userId: string): Promise<void> {
+  await apiFetch(`/users/${userId}/reset-progress`, { method: 'POST' })
+}
+
 // ── Scheduler ─────────────────────────────────────────────────────────────
 
 export async function getSchedulerStatus(): Promise<SchedulerStatus> {

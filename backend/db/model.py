@@ -86,6 +86,7 @@ class UserProfile(Base):
         String, default="openrouter/anthropic/claude-sonnet-4.6"
     )
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_utcnow)
+    goal_start_override: Mapped[date | None] = mapped_column(Date, nullable=True)
 
     user: Mapped["User"] = relationship(back_populates="profile")
 

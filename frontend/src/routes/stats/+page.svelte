@@ -4,6 +4,7 @@
   import {
     getKpiMetrics,
     getGoalProgress,
+    resetGoalProgress,
     triggerPipeline,
     logManualWorkout,
   } from "$lib/api";
@@ -26,6 +27,7 @@
   let goal: GoalProgress | null = $state(null);
   let loading = $state(true);
   let selectedDays = $state(14);
+  let resetting = $state(false);
 
   async function reload() {
     if (!$userId) return;
@@ -161,6 +163,17 @@
     if (!$userId) return;
     await triggerPipeline($userId);
     await reload();
+  }
+
+  async function handleResetProgress() {
+    if (!$userId) return;
+    resetting = true;
+    try {
+      await resetGoalProgress($userId);
+      goal = await getGoalProgress($userId);
+    } finally {
+      resetting = false;
+    }
   }
 
   // ── Manual workout log ────────────────────────────────────────────────
@@ -376,6 +389,13 @@
                 </p>
               {/if}
               <p class="text-sm text-slate-400 italic">{goal.coaching_note}</p>
+              <button
+                onclick={handleResetProgress}
+                disabled={resetting}
+                class="mt-1 px-3 py-1 text-xs bg-slate-700 hover:bg-slate-600 disabled:opacity-50 text-slate-300 rounded-lg transition-colors"
+              >
+                {resetting ? "Resetting…" : "Reset Progress"}
+              </button>
             </div>
             <!-- Col 2: Gauge -->
             <div class="flex justify-center">
