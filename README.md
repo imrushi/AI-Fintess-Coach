@@ -48,6 +48,8 @@ A full-stack AI-powered personal fitness coaching app that syncs with Garmin Con
 - **LTHR** — lactate threshold heart rate used to set training zones
 - **Current weekly volume** — per-sport baseline (swim / bike / run km/week) fed to the planner
 - **Date of birth** — enables age-adjusted training recommendations
+- **Auto fitness level adjustment** — daily pipeline evaluates 4-week completion rate and session volume; upgrades (≥80% rate + ≥16 sessions) or downgrades (<40% rate across two consecutive 14-day windows) automatically with zero LLM cost; manual override locks the level; history log visible in Settings
+- **Goal progress reset** — reset the goal start date to today so progress % recalculates from a new baseline without changing the goal event or date
 
 ### Cost & Ops
 - **Per-run LLM cost tracking** — each pipeline run logs token counts and estimated USD cost (`AgentRun` table)
@@ -60,6 +62,7 @@ A full-stack AI-powered personal fitness coaching app that syncs with Garmin Con
 - **Scheduler with pause/resume** — APScheduler runs the daily pipeline automatically; can be paused and resumed from the UI
 - **Schema hardening** — `StrengthExercise` and `SwimSet` schemas tolerate partial/unexpected LLM output with safe defaults and field remapping
 - **Docker deployment** — single `docker compose up` spins up backend, frontend, and Nginx; SQLite DB and Garmin session persist in a bind-mounted volume
+- **Mobile-optimised UI** — responsive layout targets 375px+; horizontal-scroll 7-day calendar, compact mobile header with Run Pipeline button, stacked segmented controls, 56px bottom tab bar
 
 ---
 
@@ -94,7 +97,8 @@ ai-coach/
 │       ├── prompt_builder.py       ← prompt construction for analysis agent
 │       ├── planning_agent.py       ← plan generation + patch agent
 │       ├── analysis_agent.py       ← readiness scoring agent
-│       ├── orchestrator.py         ← full pipeline runner
+│       ├── orchestrator.py             ← full pipeline runner
+│       ├── fitness_level_evaluator.py  ← algorithmic fitness level auto-adjustment (no LLM)
 │       ├── context.py              ← ConversationContext for cross-agent state
 │       ├── caveman.py              ← CavemanCompressor: verbose → terse prompt tokens
 │       └── data_freshness.py       ← guards pipeline if today's Garmin data missing
@@ -258,9 +262,11 @@ App runs at [http://localhost:5173](http://localhost:5173). Vite proxies `/api/*
 | Method | Path | Description |
 |---|---|---|
 | `GET` | `/api/profile/{user_id}` | Get user profile |
-| `PUT` | `/api/profile/{user_id}` | Update user profile |
+| `PUT` | `/api/profile/{user_id}` | Update user profile (setting `fitness_level` auto-locks it) |
 | `GET` | `/api/profile/{user_id}/model-config` | Get analysis + planning model config |
 | `PUT` | `/api/profile/{user_id}/model-config` | Set analysis + planning model config |
+| `GET` | `/api/profile/{user_id}/fitness-history` | Fitness level change history (auto + manual) |
+| `POST` | `/api/users/{user_id}/reset-progress` | Reset goal start date to today |
 | `GET` | `/api/costs/{user_id}` | LLM cost history |
 
 ### Data Management
@@ -309,3 +315,7 @@ alembic revision --autogenerate -m "describe_change"
 **Consistency score seems low** — use the "Couldn't do it" button on session cards to mark legitimate skips (illness, travel, etc.). Skipped sessions are excluded from the consistency denominator.
 
 **Want to regenerate the plan from scratch** — call `DELETE /api/plans/current/{user_id}` to clear the active plan, then `POST /api/pipeline/run` to generate a new one.
+
+**Fitness level not changing automatically** — check that the "Auto-adjust" toggle is ON in Settings → Athlete Profile. If it was turned off (or you manually selected a level), `fitness_level_locked` is `true` and the evaluator skips you. Toggle it back on to re-enable.
+
+**Fitness level changed unexpectedly** — view the full change log in Settings → Athlete Profile → Level History. Each entry shows old level, new level, direction, and the completion-rate reason.
