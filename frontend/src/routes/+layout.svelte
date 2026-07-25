@@ -311,7 +311,33 @@
 
     <!-- ── Main content area ──────────────────────────────────────────── -->
     <div class="flex-1 flex flex-col lg:ml-64 min-h-screen">
-      <!-- Top bar -->
+      <!-- Mobile header (< lg) -->
+      <header
+        class="lg:hidden sticky top-0 z-30 flex items-center justify-between
+                   px-4 py-3 bg-slate-900 border-b border-slate-700/60"
+      >
+        <h1 class="text-base font-semibold text-slate-100 truncate mr-2">
+          {pageTitle}
+        </h1>
+        <button
+          onclick={handleRunPipeline}
+          disabled={$pipelineRunning}
+          class="shrink-0 flex items-center gap-1.5 px-3 py-2 bg-blue-600 hover:bg-blue-700
+                     disabled:opacity-60 disabled:cursor-not-allowed text-white text-sm font-medium
+                     rounded-lg transition min-h-[40px]"
+        >
+          {#if $pipelineRunning}
+            <span
+              class="inline-block w-3 h-3 border-2 border-white/40 border-t-white rounded-full animate-spin"
+            ></span>
+            <span>Running</span>
+          {:else}
+            <span>⚡</span><span>Run</span>
+          {/if}
+        </button>
+      </header>
+
+      <!-- Desktop top bar -->
       <header
         class="hidden lg:flex items-center justify-between
                    px-6 py-4 bg-slate-900 border-b border-slate-700/60 sticky top-0 z-30"
@@ -350,8 +376,8 @@
         {@const active = isActive(tab.href)}
         <a
           href={tab.href}
-          class="flex-1 flex flex-col items-center justify-center py-2 gap-0.5 text-xs font-medium
-               transition-colors
+          class="flex-1 flex flex-col items-center justify-center py-3 gap-0.5 text-xs font-medium
+               transition-colors min-h-[56px]
                {active
             ? 'text-blue-500'
             : 'text-slate-400 hover:text-slate-200'}"

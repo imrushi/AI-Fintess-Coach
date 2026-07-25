@@ -417,7 +417,7 @@
       Your check-in feeds into tomorrow's readiness analysis and automatically
       adjusts your training plan if needed.
     </p>
-    <div class="grid grid-cols-3 gap-3">
+    <div class="grid grid-cols-1 sm:grid-cols-3 gap-3">
       {#each [{ icon: "📊", title: "RPE tracked", desc: "Effort logged for load analysis" }, { icon: "😴", title: "Recovery monitored", desc: "Fatigue trends updated" }, { icon: "🔄", title: "Plan adapts daily", desc: "Tomorrow adjusts automatically" }] as card}
         <div class="card p-3 text-center space-y-1">
           <span class="text-xl">{card.icon}</span>

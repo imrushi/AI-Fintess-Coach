@@ -785,12 +785,12 @@
         <!-- Score -->
         <div class="flex items-center gap-2 mr-1">
           <TrendingUp size={15} class="text-slate-400" />
-          <span class="text-xs text-slate-400 font-medium">Readiness</span>
+          <span class="text-sm text-slate-400 font-medium">Readiness</span>
           <span
-            class="font-bold text-base {readinessToColor(r.readiness_score)}"
+            class="font-bold text-lg {readinessToColor(r.readiness_score)}"
             >{r.readiness_score}</span
           >
-          <span class="text-slate-300 text-xs">/100</span>
+          <span class="text-slate-300 text-sm">/100</span>
         </div>
 
         <div class="h-4 w-px bg-slate-200"></div>
@@ -805,7 +805,7 @@
         <!-- HRV -->
         {#if r.key_signals?.hrv?.deviation_pct != null}
           {@const hrv = r.key_signals.hrv.deviation_pct}
-          <div class="flex items-center gap-1.5 text-xs">
+          <div class="flex items-center gap-1.5 text-sm">
             <span class="text-slate-400">HRV</span>
             <span class="font-semibold text-slate-200"
               >{r.key_signals?.hrv?.deviation_pct != null
@@ -819,7 +819,7 @@
 
         <!-- Sleep -->
         {#if r.key_signals?.sleep?.score != null}
-          <div class="flex items-center gap-1.5 text-xs">
+          <div class="flex items-center gap-1.5 text-sm">
             <span class="text-slate-400">Sleep</span>
             <span class="font-semibold text-slate-200"
               >{r.key_signals.sleep.score}/100</span
@@ -911,7 +911,8 @@
                 Week 1
               </p>
             {/if}
-            <div class="grid grid-cols-2 sm:grid-cols-4 lg:grid-cols-7 gap-2">
+            <div class="overflow-x-auto -mx-4 px-4 sm:mx-0 sm:px-0">
+            <div class="grid grid-cols-7 gap-2 min-w-[448px]">
               {#each week1 as session (session.date)}
                 {@const isPast = session.date < today}
                 {@const isToday = session.date === today}
@@ -1015,7 +1016,7 @@
                 <!-- Expanded accordion (spans full row via negative margin trick) -->
                 {#if isExpanded}
                   <div
-                    class="col-span-2 sm:col-span-4 lg:col-span-7 card p-4 -mt-1 space-y-3 text-sm"
+                    class="col-span-7 card p-4 -mt-1 space-y-3 text-sm"
                   >
                     <div class="flex items-start justify-between gap-4">
                       <div>
@@ -1185,6 +1186,7 @@
                 {/if}
               {/each}
             </div>
+            </div>
           </div>
         {/if}
 
@@ -1204,7 +1206,8 @@
                 Week 2
               </p>
             {/if}
-            <div class="grid grid-cols-2 sm:grid-cols-4 lg:grid-cols-7 gap-2">
+            <div class="overflow-x-auto -mx-4 px-4 sm:mx-0 sm:px-0">
+            <div class="grid grid-cols-7 gap-2 min-w-[448px]">
               {#each week2 as session (session.date)}
                 {@const isPast = session.date < today}
                 {@const isExpanded = expandedDates.has(session.date)}
@@ -1279,7 +1282,7 @@
 
                 {#if isExpanded}
                   <div
-                    class="col-span-2 sm:col-span-4 lg:col-span-7 card p-4 -mt-1 space-y-3 text-sm"
+                    class="col-span-7 card p-4 -mt-1 space-y-3 text-sm"
                   >
                     <div class="flex items-start justify-between gap-4">
                       <div>
@@ -1446,6 +1449,7 @@
                   </div>
                 {/if}
               {/each}
+            </div>
             </div>
           </div>
         {/if}

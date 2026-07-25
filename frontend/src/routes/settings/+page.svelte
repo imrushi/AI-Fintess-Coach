@@ -580,7 +580,7 @@
             </div>
 
             <!-- Current Weekly Volume -->
-            <div class="col-span-2 space-y-2">
+            <div class="col-span-1 sm:col-span-2 space-y-2">
               <p class="label-sm">Current Weekly Volume</p>
               <p class="text-xs text-slate-500">
                 Your typical training load right now — used to calibrate the AI
@@ -637,7 +637,7 @@
             </div>
 
             <!-- Swim pool time cap -->
-            <div class="col-span-2 space-y-2">
+            <div class="col-span-1 sm:col-span-2 space-y-2">
               <p class="label-sm">Max Pool Session Duration</p>
               <p class="text-xs text-slate-500">
                 Hard cap on how long you can spend in the pool (e.g. lane
@@ -688,14 +688,14 @@
             {#if !form.fitness_level_locked}
               <p class="text-xs text-slate-400">Level will adjust automatically based on your 4-week completion rate. Toggle off to set manually.</p>
             {/if}
-            <div class="flex gap-2">
+            <div class="flex flex-col sm:flex-row gap-2">
               {#each ["beginner", "intermediate", "advanced"] as level}
                 <button
                   onclick={() => {
                     form.fitness_level = level;
                     form.fitness_level_locked = true;
                   }}
-                  class="flex-1 py-2 rounded-lg text-sm font-medium capitalize transition-colors border
+                  class="flex-1 py-2.5 rounded-lg text-sm font-medium capitalize transition-colors border
                          {form.fitness_level === level
                     ? 'bg-blue-600 text-white border-blue-600'
                     : 'bg-slate-700 text-slate-300 border-slate-600 hover:bg-slate-600'}"

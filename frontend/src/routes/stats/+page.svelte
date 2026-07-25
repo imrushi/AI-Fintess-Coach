@@ -256,7 +256,7 @@
   {#if showLogForm}
     <div class="bg-slate-800 border border-slate-700 rounded-xl p-4 space-y-4">
       <h2 class="font-semibold text-slate-200">Log Non-Garmin Workout</h2>
-      <div class="grid grid-cols-2 md:grid-cols-4 gap-3">
+      <div class="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-4 gap-3">
         <div class="flex flex-col gap-1">
           <label class="text-xs text-slate-400">Date</label>
           <input
