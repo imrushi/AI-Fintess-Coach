@@ -98,6 +98,7 @@ def _profile_to_dict(p: UserProfile) -> dict:
         "swim_max_session_min": p.swim_max_session_min,
         "model_analysis": p.model_analysis,
         "model_planning": p.model_planning,
+        "weekly_schedule": p.weekly_schedule,
         "updated_at": p.updated_at.isoformat() if p.updated_at else None,
     }
 
@@ -127,6 +128,7 @@ class UpdateProfileRequest(BaseModel):
     swim_max_session_min: int | None = None    # hard cap on pool time (minutes)
     model_analysis: str | None = None
     model_planning: str | None = None
+    weekly_schedule: str | None = None  # JSON string: {day: {type, note}}
 
     @field_validator("goal_date")
     @classmethod

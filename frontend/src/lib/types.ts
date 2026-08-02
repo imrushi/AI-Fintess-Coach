@@ -173,6 +173,7 @@ export interface UserProfile {
   swim_max_session_min: number | null
   model_analysis: string
   model_planning: string
+  weekly_schedule: string | null
 }
 
 // ── Helper types & functions ──────────────────────────────────────────────

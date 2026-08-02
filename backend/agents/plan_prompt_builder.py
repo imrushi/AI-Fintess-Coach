@@ -95,15 +95,10 @@ PUSH_THROUGH OVERRIDE (athlete chose to ignore rest recommendation):
 - Cap intensity at Z3 maximum — no threshold or VO2max work
 - Add explicit warning in session description
 
-WEEKLY SCHEDULE CONSTRAINTS (non-negotiable):
-- Tuesday: athlete travels to office — ONLY bodyweight strength/calisthenics allowed (no running, cycling, or swimming). No gym equipment assumed; full-body bodyweight movements permitted.
-- Wednesday: athlete travels back 200 km — mandatory REST day. No training of any kind. Active recovery (light walk or breathwork) is acceptable but do not schedule a workout.
-
 STRENGTH SESSIONS:
 - Include calisthenics/strength work on low-intensity days where appropriate
 - Format strength exercises as a list under the "exercises" key: [{"exercise": str, "sets": int, "reps_or_duration": str, "notes": str}]
 - Beginner level: prioritise bodyweight compound movements (push-ups, dead bugs, pike push-ups, wall holds)
-- Tuesday strength must be full-body bodyweight: push-ups, pike push-ups, diamond push-ups, tricep dips, wall handstand holds, shoulder taps, plank variations, dead bugs, squats, lunges, glute bridges, mountain climbers, burpees, jump squats
 - Do not programme strength on the same day as Z4/Z5 sessions
 - For non-strength sessions, omit the exercises key or set it to []
 
@@ -198,6 +193,37 @@ def load_previous_plan_summary(user_id: str) -> str | None:
     return "\n".join(lines)
 
 
+_SCHEDULE_DAY_ORDER = ["monday", "tuesday", "wednesday", "thursday", "friday", "saturday", "sunday"]
+
+
+def _build_schedule_constraints_block(weekly_schedule_json: str | None) -> str:
+    """Build a WEEKLY SCHEDULE CONSTRAINTS prompt block from profile JSON, or return empty string."""
+    if not weekly_schedule_json:
+        return ""
+    try:
+        schedule = json.loads(weekly_schedule_json)
+    except (json.JSONDecodeError, TypeError):
+        return ""
+    constrained = {d: v for d, v in schedule.items() if v.get("type") not in (None, "unrestricted")}
+    if not constrained:
+        return ""
+    lines = ["WEEKLY SCHEDULE CONSTRAINTS (non-negotiable):"]
+    for day in _SCHEDULE_DAY_ORDER:
+        if day not in constrained:
+            continue
+        entry = constrained[day]
+        constraint_type = entry.get("type", "unrestricted")
+        note = entry.get("note", "").strip()
+        label = day.capitalize()
+        if constraint_type == "rest":
+            desc = "mandatory REST day. No training of any kind. Active recovery (light walk or breathwork) is acceptable but do not schedule a workout."
+            lines.append(f"- {label}: {note + ' — ' if note else ''}{desc}")
+        elif constraint_type == "limited":
+            desc = "ONLY bodyweight strength/calisthenics allowed (no running, cycling, or swimming). No gym equipment assumed; full-body bodyweight movements permitted."
+            lines.append(f"- {label}: {note + ' — ' if note else ''}{desc}")
+    return "\n".join(lines) + "\n"
+
+
 def build_planning_prompt(
     user_id: str,
     readiness_report: ReadinessReport,
@@ -206,6 +232,7 @@ def build_planning_prompt(
     """Assemble the full Planning-Agent prompt."""
 
     profile = get_user_profile(user_id) or {}
+    schedule_block = _build_schedule_constraints_block(profile.get("weekly_schedule"))
     recent_workouts = get_recent_workouts(user_id, days=14)
     weeks_to_goal = get_weeks_to_goal(user_id)
     hr_zones = compute_hr_zones(user_id)
@@ -241,8 +268,8 @@ def build_planning_prompt(
         f"Dietary preference: {diet_pref}\n"
         f"Allergies: {diet_allergy}\n"
         f"Preferred long day: Saturday\n"
-        f"Travel constraints: Tuesday = office day (bodyweight strength only, full-body OK); Wednesday = long return trip (rest day)\n"
-        f"Swim equipment available: {swim_equipment}\n"
+        + (f"Schedule constraints:\n{schedule_block}\n" if schedule_block else "")
+        + f"Swim equipment available: {swim_equipment}\n"
         f"Swim stroke proficiency: {swim_strokes}\n"
         f"Current weekly volume — Swim: {_vol(current_swim_km)} | Bike: {_vol(current_bike_km)} | Run: {_vol(current_run_km)}\n"
         + (
@@ -367,10 +394,11 @@ def build_planning_prompt(
     # Compress
     compressed, ratio = compress(user_prompt)
 
-    token_estimate = (len(PLAN_SYSTEM_PROMPT) + len(compressed)) // 4
+    final_plan_system_prompt = PLAN_SYSTEM_PROMPT + schedule_block
+    token_estimate = (len(final_plan_system_prompt) + len(compressed)) // 4
 
     return PlanPromptPackage(
-        system_prompt=PLAN_SYSTEM_PROMPT,
+        system_prompt=final_plan_system_prompt,
         user_prompt=user_prompt,
         compressed_user_prompt=compressed,
         compression_ratio=round(ratio, 3),
@@ -387,10 +415,6 @@ Apply the same gate rules as a full plan:
 - PROCEED_WITH_CAUTION: reduce intensity one zone, cap duration at 75%
 - REST_RECOMMENDED: replace Z3+ with Z1-Z2, max 60min
 - MANDATORY_REST: active recovery only (yoga, walk, easy swim <30min)
-
-Weekly schedule constraints:
-- Tuesday: bodyweight strength/calisthenics only (no run/bike/swim — athlete travels to office). Full-body movements allowed.
-- Wednesday: mandatory rest day (athlete travels back 200 km)
 
 Yoga sessions must include named poses, a breathing exercise block (box breathing, Nadi Shodhana, 4-7-8, etc.), \
 and be structured as: breathing warm-up → active poses → passive stretches → breathwork cool-down.
@@ -426,6 +450,7 @@ def build_daily_patch_prompt(
     from db.reader import get_user_profile
 
     profile = get_user_profile(user_id) or {}
+    schedule_block = _build_schedule_constraints_block(profile.get("weekly_schedule"))
     hr_zones = compute_hr_zones(user_id)
 
     today = date.today()
@@ -542,10 +567,11 @@ def build_daily_patch_prompt(
 
     user_prompt = "\n\n".join(sections)
     compressed, ratio = compress(user_prompt)
-    token_estimate = (len(PATCH_SYSTEM_PROMPT) + len(compressed)) // 4
+    final_patch_system_prompt = PATCH_SYSTEM_PROMPT + schedule_block
+    token_estimate = (len(final_patch_system_prompt) + len(compressed)) // 4
 
     return PatchPromptPackage(
-        system_prompt=PATCH_SYSTEM_PROMPT,
+        system_prompt=final_patch_system_prompt,
         user_prompt=user_prompt,
         compressed_user_prompt=compressed,
         compression_ratio=round(ratio, 3),
@@ -572,6 +598,7 @@ def build_today_patch_prompt(
     from db.reader import compute_hr_zones, get_user_profile
 
     profile = get_user_profile(user_id) or {}
+    schedule_block = _build_schedule_constraints_block(profile.get("weekly_schedule"))
     hr_zones = compute_hr_zones(user_id)
 
     today = date.today()
@@ -680,10 +707,11 @@ def build_today_patch_prompt(
 
     user_prompt = "\n\n".join(sections)
     compressed, ratio = compress(user_prompt)
-    token_estimate = (len(PATCH_SYSTEM_PROMPT) + len(compressed)) // 4
+    final_patch_system_prompt = PATCH_SYSTEM_PROMPT + schedule_block
+    token_estimate = (len(final_patch_system_prompt) + len(compressed)) // 4
 
     return PatchPromptPackage(
-        system_prompt=PATCH_SYSTEM_PROMPT,
+        system_prompt=final_patch_system_prompt,
         user_prompt=user_prompt,
         compressed_user_prompt=compressed,
         compression_ratio=round(ratio, 3),

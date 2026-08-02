@@ -88,6 +88,7 @@ class UserProfile(Base):
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_utcnow)
     goal_start_override: Mapped[date | None] = mapped_column(Date, nullable=True)
     fitness_level_locked: Mapped[bool] = mapped_column(Boolean, default=False, server_default="0")
+    weekly_schedule: Mapped[str | None] = mapped_column(String, nullable=True)  # JSON: {day: {type, note}}
 
     user: Mapped["User"] = relationship(back_populates="profile")
 

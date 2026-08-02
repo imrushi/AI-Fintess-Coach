@@ -86,10 +86,25 @@
     model_planning: "",
   });
 
+  // ── Weekly schedule state ─────────────────────────────────────────────
+  type ScheduleType = "unrestricted" | "limited" | "rest";
+  type ScheduleEntry = { type: ScheduleType; note: string };
+  const DAYS = ["monday", "tuesday", "wednesday", "thursday", "friday", "saturday", "sunday"] as const;
+
+  function blankSchedule(): Record<string, ScheduleEntry> {
+    return Object.fromEntries(DAYS.map((d) => [d, { type: "unrestricted" as ScheduleType, note: "" }]));
+  }
+
+  let weeklySchedule = $state<Record<string, ScheduleEntry>>(blankSchedule());
+
   // snapshot of saved values for dirty tracking — use separate state vars to avoid spread warning
   let savedFormJson = $state("");
+  let savedWeeklyScheduleJson = $state(JSON.stringify(blankSchedule()));
 
-  const isDirty = $derived(JSON.stringify(form) !== savedFormJson);
+  const isDirty = $derived(
+    JSON.stringify(form) !== savedFormJson ||
+    JSON.stringify(weeklySchedule) !== savedWeeklyScheduleJson
+  );
 
   const modelChanged = $derived.by(() => {
     if (!profile) return false;
@@ -179,6 +194,23 @@
       form = { ...f };
       customGoalText = isCustomGoal ? (p.goal_event ?? "") : "";
       savedFormJson = JSON.stringify(f);
+      // Load weekly schedule
+      const sched = blankSchedule();
+      if (p.weekly_schedule) {
+        try {
+          const parsed = JSON.parse(p.weekly_schedule) as Record<string, { type?: string; note?: string }>;
+          for (const day of DAYS) {
+            if (parsed[day]) {
+              sched[day] = {
+                type: (parsed[day].type as ScheduleType) ?? "unrestricted",
+                note: parsed[day].note ?? "",
+              };
+            }
+          }
+        } catch { /* ignore malformed JSON */ }
+      }
+      weeklySchedule = sched;
+      savedWeeklyScheduleJson = JSON.stringify(sched);
     } catch (e: unknown) {
       showToast(
         e instanceof Error ? e.message : "Failed to load profile",
@@ -235,11 +267,22 @@
           : null,
         model_analysis: form.model_analysis,
         model_planning: form.model_planning,
+        weekly_schedule: (() => {
+          const payload: Record<string, { type: string; note?: string }> = {};
+          for (const day of DAYS) {
+            const entry = weeklySchedule[day];
+            if (entry.type !== "unrestricted") {
+              payload[day] = { type: entry.type, ...(entry.note.trim() ? { note: entry.note.trim() } : {}) };
+            }
+          }
+          return JSON.stringify(payload);
+        })(),
       });
       form.garmin_password = "";
       profile = updated;
       userProfile.set(updated);
       savedFormJson = JSON.stringify(form);
+      savedWeeklyScheduleJson = JSON.stringify(weeklySchedule);
       saveSuccess = true;
       showToast("Settings saved");
       setTimeout(() => {
@@ -254,6 +297,7 @@
 
   function discardChanges() {
     form = JSON.parse(savedFormJson);
+    weeklySchedule = JSON.parse(savedWeeklyScheduleJson);
   }
 
   // ── Sync / pipeline triggers ──────────────────────────────────────────
@@ -831,7 +875,60 @@
     {/if}
   </div>
 
-  <!-- ── SECTION 2: AI Models ──────────────────────────────────────── -->
+  <!-- ── SECTION 2: Weekly Schedule ───────────────────────────────── -->
+  <div class="bg-slate-800 border border-slate-700 rounded-xl overflow-hidden">
+    <button
+      onclick={() => {
+        activeSection = activeSection === "schedule" ? "" : "schedule";
+      }}
+      class="w-full flex items-center justify-between p-5 text-left hover:bg-slate-700/40 transition"
+    >
+      <div class="flex items-center gap-3">
+        <Calendar size={18} class="text-green-400 shrink-0" />
+        <span class="font-semibold text-slate-100">Weekly Schedule</span>
+      </div>
+      {#if activeSection === "schedule"}
+        <ChevronUp size={16} class="text-slate-400" />
+      {:else}
+        <ChevronDown size={16} class="text-slate-400" />
+      {/if}
+    </button>
+
+    {#if activeSection === "schedule"}
+      <div class="px-5 pb-6 border-t border-slate-700 pt-5 space-y-4">
+        <p class="text-sm text-slate-400">
+          Set per-day training constraints. The AI will follow these every week when generating plans and patches.
+        </p>
+        {#each DAYS as day}
+          <div class="space-y-2">
+            <div class="flex items-center gap-3">
+              <span class="w-24 text-sm font-medium text-slate-300 capitalize shrink-0">{day}</span>
+              <select
+                bind:value={weeklySchedule[day].type}
+                class="flex-1 bg-slate-700 border border-slate-600 text-slate-100 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
+              >
+                <option value="unrestricted">Unrestricted</option>
+                <option value="limited">Limited (bodyweight only)</option>
+                <option value="rest">Rest day</option>
+              </select>
+            </div>
+            {#if weeklySchedule[day].type !== "unrestricted"}
+              <div class="pl-[calc(6rem+0.75rem)]">
+                <input
+                  type="text"
+                  placeholder="Optional note, e.g. travels to office"
+                  bind:value={weeklySchedule[day].note}
+                  class="w-full bg-slate-700 border border-slate-600 text-slate-100 placeholder-slate-500 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
+                />
+              </div>
+            {/if}
+          </div>
+        {/each}
+      </div>
+    {/if}
+  </div>
+
+  <!-- ── SECTION 3: AI Models ──────────────────────────────────────── -->
   <div class="bg-slate-800 border border-slate-700 rounded-xl overflow-hidden">
     <button
       onclick={() => {
@@ -998,7 +1095,7 @@
     {/if}
   </div>
 
-  <!-- ── SECTION 3: Data & Sync ─────────────────────────────────────── -->
+  <!-- ── SECTION 4: Data & Sync ─────────────────────────────────────── -->
   <div class="bg-slate-800 border border-slate-700 rounded-xl overflow-hidden">
     <button
       onclick={() => {
@@ -1139,7 +1236,7 @@
     {/if}
   </div>
 
-  <!-- ── SECTION 4: Danger Zone ─────────────────────────────────────── -->
+  <!-- ── SECTION 5: Danger Zone ─────────────────────────────────────── -->
   <div class="bg-slate-800 border border-red-900/50 rounded-xl overflow-hidden">
     <button
       onclick={() => {
