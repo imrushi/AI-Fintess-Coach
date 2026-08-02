@@ -278,6 +278,44 @@ export interface KpiMetrics {
   weekly_distance: WeeklyDistance[]
 }
 
+// ── HR Zone types ─────────────────────────────────────────────────────────
+
+export interface HRZoneBoundary {
+  label: string
+  low: number
+  high: number
+}
+
+export interface HRZoneMethod {
+  available: boolean
+  method: string
+  zones: Record<IntensityZone, HRZoneBoundary> | null
+}
+
+export interface HRZoneDefinitions {
+  lthr: HRZoneMethod
+  max_hr_pct: HRZoneMethod
+}
+
+export interface WorkoutZoneEntry {
+  date: string
+  sport: string
+  duration_min: number | null
+  garmin_activity_id: string | null
+  zone_secs: Record<IntensityZone, number>
+  zone_thresholds: Record<IntensityZone, { low: number; high: number }> | null
+}
+
+export interface HRZoneData {
+  zone_definitions: HRZoneDefinitions
+  has_lthr: boolean
+  has_max_hr: boolean
+  total_workouts: number
+  workouts_with_zones: number
+  aggregate_secs: Record<IntensityZone, number>
+  workouts: WorkoutZoneEntry[]
+}
+
 export interface GoalProgress {
   goal_event: string | null
   goal_date: string | null

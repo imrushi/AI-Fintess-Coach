@@ -327,6 +327,174 @@ def compute_hr_zones(user_id: str) -> dict | None:
     }
 
 
+_ZONE_LABELS = ["Recovery", "Aerobic", "Tempo", "Threshold", "VO2max"]
+_ZONE_KEYS = ["Z1", "Z2", "Z3", "Z4", "Z5"]
+
+
+def _friel_zones(lthr: int) -> dict:
+    return {
+        "Z1": {"label": "Recovery",   "low": 0,                        "high": round(lthr * 0.85) - 1},
+        "Z2": {"label": "Aerobic",    "low": round(lthr * 0.85),       "high": round(lthr * 0.89)},
+        "Z3": {"label": "Tempo",      "low": round(lthr * 0.90),       "high": round(lthr * 0.94)},
+        "Z4": {"label": "Threshold",  "low": round(lthr * 0.95),       "high": round(lthr * 0.99)},
+        "Z5": {"label": "VO2max",     "low": lthr,                     "high": 999},
+    }
+
+
+def _max_hr_pct_zones(max_hr: int) -> dict:
+    return {
+        "Z1": {"label": "Recovery",   "low": round(max_hr * 0.50), "high": round(max_hr * 0.60) - 1},
+        "Z2": {"label": "Aerobic",    "low": round(max_hr * 0.60), "high": round(max_hr * 0.70) - 1},
+        "Z3": {"label": "Tempo",      "low": round(max_hr * 0.70), "high": round(max_hr * 0.80) - 1},
+        "Z4": {"label": "Threshold",  "low": round(max_hr * 0.80), "high": round(max_hr * 0.90) - 1},
+        "Z5": {"label": "VO2max",     "low": round(max_hr * 0.90), "high": max_hr},
+    }
+
+
+def get_hr_zone_definitions(user_id: str) -> dict:
+    """Return HR zone definitions for both LTHR (Friel) and max-HR% methods.
+
+    Each method carries 'available', 'method' (label string), and 'zones' (or None).
+    """
+    with get_session() as s:
+        profile = s.get(UserProfile, user_id)
+        if profile is None:
+            return {
+                "lthr": {"available": False, "method": "No user profile found", "zones": None},
+                "max_hr_pct": {"available": False, "method": "No user profile found", "zones": None},
+            }
+
+        lthr = profile.lthr
+        dob = profile.date_of_birth
+
+        max_hr_recorded: int | None = s.execute(
+            select(func.max(Workout.max_hr)).where(
+                Workout.user_id == user_id,
+                Workout.max_hr.is_not(None),
+            )
+        ).scalar()
+
+    # LTHR method
+    if lthr:
+        lthr_def = {
+            "available": True,
+            "method": f"LTHR={lthr} bpm (Friel zones)",
+            "zones": _friel_zones(lthr),
+        }
+    else:
+        lthr_def = {
+            "available": False,
+            "method": "LTHR not set — configure in Settings",
+            "zones": None,
+        }
+
+    # Max-HR% method
+    max_hr = max_hr_recorded
+    if max_hr is not None:
+        max_hr_label = f"Recorded max HR={max_hr} bpm (from workouts)"
+    elif dob is not None:
+        age = (date.today() - dob).days // 365
+        max_hr = 220 - age
+        max_hr_label = f"Age-based max HR={max_hr} bpm (220−{age})"
+    else:
+        max_hr_label = None
+
+    if max_hr is not None:
+        max_hr_def = {
+            "available": True,
+            "method": max_hr_label,
+            "zones": _max_hr_pct_zones(max_hr),
+        }
+    else:
+        max_hr_def = {
+            "available": False,
+            "method": "No max HR data — record workouts with HR or set date of birth",
+            "zones": None,
+        }
+
+    return {"lthr": lthr_def, "max_hr_pct": max_hr_def}
+
+
+def get_hr_zone_summary(user_id: str, days: int = 14) -> dict:
+    """Return aggregate zone time and per-workout breakdown for the given period."""
+    cutoff = date.today() - timedelta(days=days)
+    empty_agg = {z: 0 for z in _ZONE_KEYS}
+
+    with get_session() as s:
+        rows = (
+            s.execute(
+                select(Workout)
+                .where(Workout.user_id == user_id, Workout.date >= cutoff)
+                .order_by(Workout.date.asc())
+            )
+            .scalars()
+            .all()
+        )
+        workout_data = [
+            {
+                "id": r.id,
+                "date": str(r.date),
+                "sport": r.sport,
+                "duration_min": r.duration_min,
+                "garmin_activity_id": r.garmin_activity_id,
+                "hr_zone_secs_json": r.hr_zone_secs_json,
+                "hr_zone_thresholds_json": r.hr_zone_thresholds_json,
+            }
+            for r in rows
+        ]
+
+    aggregate_secs = {z: 0.0 for z in _ZONE_KEYS}
+    workouts_with_zones = 0
+    workout_list = []
+
+    for w in workout_data:
+        raw_secs = w["hr_zone_secs_json"]
+        raw_thresh = w["hr_zone_thresholds_json"]
+
+        if not raw_secs:
+            continue
+
+        try:
+            secs_by_garmin_zone: dict = json.loads(raw_secs)
+        except (json.JSONDecodeError, TypeError):
+            continue
+
+        # Map Garmin numeric keys ("1"–"5") → "Z1"–"Z5"
+        zone_secs = {f"Z{k}": float(v) for k, v in secs_by_garmin_zone.items() if k.isdigit()}
+        # Fill missing zones with 0
+        for z in _ZONE_KEYS:
+            zone_secs.setdefault(z, 0.0)
+
+        # Parse thresholds
+        zone_thresholds = None
+        if raw_thresh:
+            try:
+                thresh_raw: dict = json.loads(raw_thresh)
+                zone_thresholds = {f"Z{k}": v for k, v in thresh_raw.items() if k.isdigit()}
+            except (json.JSONDecodeError, TypeError):
+                pass
+
+        for z in _ZONE_KEYS:
+            aggregate_secs[z] += zone_secs.get(z, 0.0)
+
+        workouts_with_zones += 1
+        workout_list.append({
+            "date": w["date"],
+            "sport": w["sport"],
+            "duration_min": w["duration_min"],
+            "garmin_activity_id": w["garmin_activity_id"],
+            "zone_secs": {z: round(zone_secs.get(z, 0.0)) for z in _ZONE_KEYS},
+            "zone_thresholds": zone_thresholds,
+        })
+
+    return {
+        "total_workouts": len(workout_data),
+        "workouts_with_zones": workouts_with_zones,
+        "aggregate_secs": {z: round(v) for z, v in aggregate_secs.items()},
+        "workouts": workout_list,
+    }
+
+
 def get_latest_readiness_report(user_id: str) -> dict | None:
     """Return the most recent readiness report as a dict, or None."""
     with get_session() as s:

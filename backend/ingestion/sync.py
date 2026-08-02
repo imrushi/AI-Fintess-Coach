@@ -8,6 +8,7 @@ from db.model import Base, get_engine
 from db.writer import ensure_user, save_daily_metrics, save_workouts
 from ingestion.garmin_client import GarminClient
 from ingestion.normaliser import normalise_day
+from ingestion.zone_utils import fetch_zones_for_activities
 
 
 def make_user_id(email: str) -> str:
@@ -50,7 +51,8 @@ def main() -> None:
             raw = client.fetch_day(date_str)
             metrics = normalise_day(raw, user_id)
             save_daily_metrics(metrics)
-            save_workouts(user_id, metrics.date, metrics.workouts_json)
+            zone_data_map = fetch_zones_for_activities(client, metrics.workouts_json)
+            save_workouts(user_id, metrics.date, metrics.workouts_json, zone_data_map=zone_data_map)
             success_count += 1
         except Exception as exc:
             print(f"  ERROR syncing {date_str}: {exc}")

@@ -7,8 +7,9 @@
     resetGoalProgress,
     triggerPipeline,
     logManualWorkout,
+    getHrZoneData,
   } from "$lib/api";
-  import type { KpiMetrics, GoalProgress } from "$lib/types";
+  import type { KpiMetrics, GoalProgress, HRZoneData } from "$lib/types";
   import {
     trendIcon,
     trendColor,
@@ -22,17 +23,32 @@
   import LineChart from "$lib/components/charts/LineChart.svelte";
   import BarChart from "$lib/components/charts/BarChart.svelte";
   import GaugeWidget from "$lib/components/charts/GaugeWidget.svelte";
+  import DonutChart from "$lib/components/charts/DonutChart.svelte";
 
   let kpi: KpiMetrics | null = $state(null);
   let goal: GoalProgress | null = $state(null);
+  let hrZone: HRZoneData | null = $state(null);
+  let zoneMethod = $state<"lthr" | "max_hr_pct">("lthr");
   let loading = $state(true);
   let selectedDays = $state(14);
   let resetting = $state(false);
 
+  const ZONE_COLORS: Record<string, string> = {
+    Z1: "#3b82f6",
+    Z2: "#22c55e",
+    Z3: "#eab308",
+    Z4: "#f97316",
+    Z5: "#ef4444",
+  };
+  const ZONES = ["Z1", "Z2", "Z3", "Z4", "Z5"] as const;
+
   async function reload() {
     if (!$userId) return;
     loading = true;
-    kpi = await getKpiMetrics($userId, selectedDays);
+    [kpi, hrZone] = await Promise.all([
+      getKpiMetrics($userId, selectedDays),
+      getHrZoneData($userId, selectedDays).catch(() => null),
+    ]);
     loading = false;
   }
 
@@ -42,9 +58,10 @@
       return;
     }
     try {
-      [kpi, goal] = await Promise.all([
+      [kpi, goal, hrZone] = await Promise.all([
         getKpiMetrics($userId, selectedDays),
         getGoalProgress($userId),
+        getHrZoneData($userId, selectedDays).catch(() => null),
       ]);
     } catch (e) {
       $globalError = "Failed to load stats";
@@ -157,6 +174,50 @@
   const acwr = $derived.by((): number | null => {
     if (!kpi) return null;
     return kpi.summary.avg_acwr_7d;
+  });
+
+  // ── HR Zone derived ───────────────────────────────────────────────────
+
+  const activeZoneDef = $derived.by(() => {
+    if (!hrZone) return null;
+    const d = hrZone.zone_definitions;
+    if (zoneMethod === "lthr" && d.lthr.available) return d.lthr;
+    if (d.max_hr_pct.available) return d.max_hr_pct;
+    return d.lthr.available ? d.lthr : null;
+  });
+
+  const donutData = $derived.by(() => {
+    if (!hrZone || hrZone.workouts_with_zones === 0) return null;
+    const totalSecs = ZONES.reduce(
+      (s, z) => s + (hrZone!.aggregate_secs[z] ?? 0),
+      0,
+    );
+    if (totalSecs === 0) return null;
+    return {
+      labels: ZONES.map((z) => {
+        const mins = Math.round((hrZone!.aggregate_secs[z] ?? 0) / 60);
+        return `${z} · ${mins}min`;
+      }),
+      data: ZONES.map((z) => hrZone!.aggregate_secs[z] ?? 0),
+      colors: ZONES.map((z) => ZONE_COLORS[z]),
+      centerLabel: `${Math.round(totalSecs / 60)}min`,
+    };
+  });
+
+  const zoneBarLabels = $derived.by((): string[] => {
+    if (!hrZone) return [];
+    return hrZone.workouts.map(
+      (w) => `${w.date.slice(5)} ${sportToEmoji(w.sport as any)}`,
+    );
+  });
+
+  const zoneBarDatasets = $derived.by(() => {
+    if (!hrZone || hrZone.workouts.length === 0) return [];
+    return ZONES.map((z) => ({
+      label: z,
+      data: hrZone!.workouts.map((w) => Math.round((w.zone_secs[z] ?? 0) / 60)),
+      color: ZONE_COLORS[z],
+    }));
   });
 
   async function runPipeline() {
@@ -853,5 +914,135 @@
         </div>
       {/if}
     </div>
+
+    <!-- ROW 8: HR Zone Distribution -->
+    {#if hrZone}
+      <div class="bg-slate-800 border border-slate-700 rounded-xl p-4 space-y-4">
+        <!-- Header + method toggle -->
+        <div class="flex items-center justify-between flex-wrap gap-3">
+          <div>
+            <h2 class="font-semibold text-slate-200">HR Zone Distribution</h2>
+            <p class="text-xs text-slate-500 mt-0.5">
+              {hrZone.workouts_with_zones} of {hrZone.total_workouts} workouts have zone data
+            </p>
+          </div>
+          <div class="flex gap-1">
+            <button
+              onclick={() => (zoneMethod = "lthr")}
+              disabled={!hrZone.has_lthr}
+              title={!hrZone.has_lthr
+                ? "Set LTHR in Settings to use Friel zones"
+                : "Friel zones based on LTHR"}
+              class={`px-3 py-1 rounded-lg text-xs font-medium transition-colors disabled:opacity-40 disabled:cursor-not-allowed ${
+                zoneMethod === "lthr"
+                  ? "bg-blue-600 text-white"
+                  : "bg-slate-700 border border-slate-600 text-slate-300 hover:bg-slate-600"
+              }`}
+            >
+              LTHR (Friel)
+            </button>
+            <button
+              onclick={() => (zoneMethod = "max_hr_pct")}
+              disabled={!hrZone.has_max_hr}
+              title={!hrZone.has_max_hr
+                ? "No max HR data — record workouts with HR or set date of birth"
+                : "Standard 5-zone model based on max HR"}
+              class={`px-3 py-1 rounded-lg text-xs font-medium transition-colors disabled:opacity-40 disabled:cursor-not-allowed ${
+                zoneMethod === "max_hr_pct"
+                  ? "bg-blue-600 text-white"
+                  : "bg-slate-700 border border-slate-600 text-slate-300 hover:bg-slate-600"
+              }`}
+            >
+              Max HR%
+            </button>
+          </div>
+        </div>
+
+        {#if hrZone.workouts_with_zones === 0}
+          <div class="text-center py-8 space-y-2">
+            <p class="text-slate-500 text-sm">No HR zone data for this period.</p>
+            <p class="text-slate-600 text-xs">
+              Sync with Garmin to collect zone data, or run the backfill script for historical workouts.
+            </p>
+          </div>
+        {:else}
+          <div class="grid md:grid-cols-2 gap-6">
+            <!-- Left: donut + zone definition table -->
+            <div class="space-y-4">
+              {#if donutData}
+                <DonutChart
+                  labels={donutData.labels}
+                  data={donutData.data}
+                  colors={donutData.colors}
+                  centerLabel={donutData.centerLabel}
+                  height={220}
+                />
+              {/if}
+
+              {#if activeZoneDef?.zones}
+                <div>
+                  <p class="text-xs text-slate-500 mb-2">{activeZoneDef.method}</p>
+                  <table class="w-full text-xs">
+                    <thead>
+                      <tr class="text-slate-500 border-b border-slate-700">
+                        <th class="pb-1 text-left font-medium">Zone</th>
+                        <th class="pb-1 text-left font-medium">BPM Range</th>
+                        <th class="pb-1 text-left font-medium">Label</th>
+                      </tr>
+                    </thead>
+                    <tbody class="divide-y divide-slate-700/40">
+                      {#each ZONES as z}
+                        {@const def = activeZoneDef.zones![z]}
+                        <tr class="text-slate-300">
+                          <td class="py-1 pr-3">
+                            <span class="inline-flex items-center gap-1">
+                              <span
+                                class="w-2 h-2 rounded-full"
+                                style="background:{ZONE_COLORS[z]}"
+                              ></span>
+                              {z}
+                            </span>
+                          </td>
+                          <td class="py-1 pr-3">
+                            {def.low === 0
+                              ? `< ${def.high}`
+                              : def.high >= 999
+                                ? `≥ ${def.low}`
+                                : `${def.low}–${def.high}`} bpm
+                          </td>
+                          <td class="py-1 text-slate-400">{def.label}</td>
+                        </tr>
+                      {/each}
+                    </tbody>
+                  </table>
+                </div>
+              {:else}
+                <p class="text-slate-500 text-xs">
+                  Zone definitions unavailable — set LTHR or record workouts with HR data.
+                </p>
+              {/if}
+            </div>
+
+            <!-- Right: stacked bar per workout -->
+            <div class="space-y-2">
+              <h3 class="text-sm font-medium text-slate-300">Zone Time per Workout (min)</h3>
+              {#if zoneBarLabels.length > 0}
+                <BarChart
+                  labels={zoneBarLabels}
+                  datasets={zoneBarDatasets}
+                  stacked={true}
+                  height={220}
+                  unit="min"
+                />
+              {:else}
+                <p class="text-slate-500 text-sm text-center py-8">
+                  No per-workout zone data.
+                </p>
+              {/if}
+            </div>
+          </div>
+        {/if}
+      </div>
+    {/if}
   {/if}
 </div>

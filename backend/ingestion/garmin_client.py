@@ -77,6 +77,9 @@ class GarminClient:
     def get_weight(self, start_date: str, end_date: str):
         return self.client.get_weigh_ins(start_date, end_date)
 
+    def get_activity_hr_in_timezones(self, activity_id: str):
+        return self.client.get_activity_hr_in_timezones(activity_id)
+
     def get_training_status(self, date_str: str):
         return self.client.get_training_status(date_str)
 

@@ -3,6 +3,7 @@ import type {
   CheckInResponse,
   FitnessLevelHistoryItem,
   GoalProgress,
+  HRZoneData,
   KpiMetrics,
   OverridePrompt,
   ReadinessReport,
@@ -234,6 +235,10 @@ export async function getFitnessLevelHistory(userId: string, limit = 10): Promis
 
 export async function getKpiMetrics(userId: string, days = 14): Promise<KpiMetrics> {
   return apiFetch(`/metrics/kpi/${userId}?days=${days}`)
+}
+
+export async function getHrZoneData(userId: string, days = 14): Promise<HRZoneData> {
+  return apiFetch(`/metrics/hr-zones/${userId}?days=${days}`)
 }
 
 export async function getGoalProgress(userId: string): Promise<GoalProgress> {

@@ -11,6 +11,7 @@ from db.model import DailyMetric, User, UserProfile, get_session
 from db.writer import save_daily_metrics, save_workouts
 from ingestion.garmin_client import GarminClient
 from ingestion.normaliser import normalise_day
+from ingestion.zone_utils import fetch_zones_for_activities
 
 logger = logging.getLogger(__name__)
 
@@ -86,11 +87,7 @@ class NightlyScheduler:
 
                 for i in range(0, 3):
                     sync_date = date.today() - timedelta(days=i)
-                    date_str = sync_date.strftime("%Y-%m-%d")
-                    raw = client.fetch_day(date_str)
-                    metrics = normalise_day(raw, user_id)
-                    save_daily_metrics(metrics)
-                    save_workouts(user_id, sync_date, metrics.workouts_json)
+                    await self._sync_one_day(client, user_id, sync_date)
                     await asyncio.sleep(2)
 
                 logger.info("Garmin sync complete for user %s", user_id)
@@ -124,11 +121,7 @@ class NightlyScheduler:
                 client = GarminClient(garmin_email, garmin_password or "")
                 client.connect()
 
-                today_str = date.today().strftime("%Y-%m-%d")
-                raw = client.fetch_day(today_str)
-                metrics = normalise_day(raw, user_id)
-                save_daily_metrics(metrics)
-                save_workouts(user_id, date.today(), metrics.workouts_json)
+                await self._sync_one_day(client, user_id, date.today())
 
                 logger.info("Morning sync complete for user %s", user_id)
 
@@ -153,6 +146,20 @@ class NightlyScheduler:
                     logger.error("Pipeline failed for %s: %s", user_id, result.error)
             except Exception as e:
                 logger.error("Pipeline exception for %s: %s", user_id, e)
+
+    async def _sync_one_day(
+        self,
+        client: GarminClient,
+        user_id: str,
+        sync_date: date,
+    ) -> None:
+        """Fetch, normalise, fetch zone data, and save one day."""
+        date_str = sync_date.strftime("%Y-%m-%d")
+        raw = client.fetch_day(date_str)
+        metrics = normalise_day(raw, user_id)
+        save_daily_metrics(metrics)
+        zone_data_map = fetch_zones_for_activities(client, metrics.workouts_json)
+        save_workouts(user_id, sync_date, metrics.workouts_json, zone_data_map=zone_data_map)
 
     def get_todays_sleep_available(self, user_id: str) -> bool:
         """Return True if today's sleep_score has been synced for this user."""
@@ -199,11 +206,7 @@ class NightlyScheduler:
 
             for i in range(0, 4):
                 sync_date = date.today() - timedelta(days=i)
-                date_str = sync_date.strftime("%Y-%m-%d")
-                raw = client.fetch_day(date_str)
-                metrics = normalise_day(raw, user_id)
-                save_daily_metrics(metrics)
-                save_workouts(user_id, sync_date, metrics.workouts_json)
+                await self._sync_one_day(client, user_id, sync_date)
                 await asyncio.sleep(2)
 
             logger.info("Garmin sync complete for user %s", user_id)

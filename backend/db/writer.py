@@ -47,7 +47,12 @@ def save_daily_metrics(metrics: DailyMetrics) -> str:
     return row_id
 
 
-def save_workouts(user_id: str, date_obj: date, activities_json: str | None) -> int:
+def save_workouts(
+    user_id: str,
+    date_obj: date,
+    activities_json: str | None,
+    zone_data_map: dict[str, dict] | None = None,
+) -> int:
     if not activities_json:
         return 0
 
@@ -74,6 +79,17 @@ def save_workouts(user_id: str, date_obj: date, activities_json: str | None) -> 
             avg_hr_val = activity.get("averageHR")
             max_hr_val = activity.get("maxHR")
 
+            # Resolve zone data — preserve existing if no new data provided
+            zone_entry = (zone_data_map or {}).get(garmin_id)
+            hr_zone_secs = (
+                json.dumps(zone_entry["secs"]) if zone_entry
+                else (existing.hr_zone_secs_json if existing else None)
+            )
+            hr_zone_thresholds = (
+                json.dumps(zone_entry["thresholds"]) if zone_entry
+                else (existing.hr_zone_thresholds_json if existing else None)
+            )
+
             workout = Workout(
                 id=existing.id if existing else str(uuid4()),
                 user_id=user_id,
@@ -85,6 +101,8 @@ def save_workouts(user_id: str, date_obj: date, activities_json: str | None) -> 
                 max_hr=int(max_hr_val) if max_hr_val is not None else None,
                 garmin_activity_id=garmin_id,
                 raw_json=json.dumps(activity, default=str),
+                hr_zone_secs_json=hr_zone_secs,
+                hr_zone_thresholds_json=hr_zone_thresholds,
             )
             session.merge(workout)
             count += 1

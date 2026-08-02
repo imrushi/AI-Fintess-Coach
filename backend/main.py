@@ -1137,6 +1137,24 @@ def get_kpi_metrics(
     }
 
 
+# ── HR Zone Endpoint ─────────────────────────────────────────────────────
+
+@app.get("/api/metrics/hr-zones/{user_id}")
+def get_hr_zones(
+    user_id: str,
+    days: int = Query(default=14, ge=1, le=365),
+):
+    from db.reader import get_hr_zone_definitions, get_hr_zone_summary
+    defs = get_hr_zone_definitions(user_id)
+    summary = get_hr_zone_summary(user_id, days)
+    return {
+        "zone_definitions": defs,
+        "has_lthr": defs["lthr"]["available"],
+        "has_max_hr": defs["max_hr_pct"]["available"],
+        **summary,
+    }
+
+
 # ── Goal Endpoint ─────────────────────────────────────────────────────────
 
 _PHASE_VOLUME: dict[str, int] = {

@@ -145,6 +145,8 @@ class Workout(Base):
     perceived_effort: Mapped[int | None] = mapped_column(Integer, nullable=True)
     garmin_activity_id: Mapped[str | None] = mapped_column(String, nullable=True)
     raw_json: Mapped[str | None] = mapped_column(String, nullable=True)
+    hr_zone_secs_json: Mapped[str | None] = mapped_column(String, nullable=True)
+    hr_zone_thresholds_json: Mapped[str | None] = mapped_column(String, nullable=True)
 
     user: Mapped["User"] = relationship(back_populates="workouts")
     feedbacks: Mapped[list["UserFeedback"]] = relationship(back_populates="workout")
