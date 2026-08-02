@@ -44,6 +44,8 @@ class ModelClient:
         messages: list[dict],
         json_mode: bool = False,
         system: str | None = None,
+        user_id: str | None = None,
+        session_id: str | None = None,
     ) -> ModelResponse:
         logger.debug(
             "Calling %s model=%s", self.config.backend.value, self.config.model_id
@@ -51,7 +53,7 @@ class ModelClient:
         start = time.time()
         try:
             if self.config.backend == ModelBackend.OPENROUTER:
-                resp = await self._call_openrouter(messages, json_mode, system)
+                resp = await self._call_openrouter(messages, json_mode, system, user_id, session_id)
             else:
                 resp = await self._call_ollama(messages, json_mode, system)
         except httpx.HTTPError as exc:
@@ -62,7 +64,8 @@ class ModelClient:
         return resp
 
     async def _call_openrouter(
-        self, messages: list[dict], json_mode: bool, system: str | None = None
+        self, messages: list[dict], json_mode: bool, system: str | None = None,
+        user_id: str | None = None, session_id: str | None = None,
     ) -> ModelResponse:
         headers = {
             "Authorization": f"Bearer {self.config.api_key}",
@@ -82,6 +85,10 @@ class ModelClient:
             body["provider"] = {"order": ["Anthropic"], "allow_fallbacks": False}
         if json_mode:
             body["response_format"] = {"type": "json_object"}
+        if user_id:
+            body["user"] = user_id
+        if session_id:
+            body["session_id"] = session_id
 
         async with httpx.AsyncClient(timeout=httpx.Timeout(60.0)) as client:
             r = await client.post(

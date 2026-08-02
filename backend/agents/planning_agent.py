@@ -37,9 +37,10 @@ class PlanningResult:
 
 
 class PlanningAgent:
-    def __init__(self, user_id: str, model_str: str) -> None:
+    def __init__(self, user_id: str, model_str: str, session_id: str | None = None) -> None:
         self.user_id = user_id
         self.model_str = model_str
+        self.session_id = session_id
         self.client = get_model_client(model_str)
         self.ctx_repo = AgentContextRepository()
         self.max_retries = settings.MAX_RETRIES
@@ -76,6 +77,8 @@ class PlanningAgent:
                 messages=messages,
                 system=system,
                 json_mode=True,
+                user_id=self.user_id,
+                session_id=self.session_id,
             )
             try:
                 plan = TrainingPlan.from_llm_response(response.content)
@@ -269,6 +272,8 @@ class PlanningAgent:
                 messages=messages,
                 system=system,
                 json_mode=True,
+                user_id=self.user_id,
+                session_id=self.session_id,
             )
             try:
                 # Parse as a single TrainingSession (or no_change signal)

@@ -61,7 +61,7 @@ class AgentOrchestrator:
 
         # Step 3 — Run Analysis Agent
         try:
-            agent = AnalysisAgent(user_id=user_id, model_str=model_str)
+            agent = AnalysisAgent(user_id=user_id, model_str=model_str, session_id=job_id)
             analysis = await agent.run(target_date)
             result.analysis_result = analysis
             result.success = True
@@ -123,7 +123,7 @@ class AgentOrchestrator:
         )
 
         try:
-            agent = PlanningAgent(user_id=user_id, model_str=model_str)
+            agent = PlanningAgent(user_id=user_id, model_str=model_str, session_id=job_id)
             planning = await agent.run(readiness_report, override_choice)
             result.planning_result = planning
             result.success = True
@@ -258,7 +258,7 @@ class AgentOrchestrator:
         model_str = profile.get("model_planning", "openrouter/anthropic/claude-sonnet-4.6")
 
         try:
-            agent = PlanningAgent(user_id=user_id, model_str=model_str)
+            agent = PlanningAgent(user_id=user_id, model_str=model_str, session_id=job_id)
             planning = await agent.run_patch(readiness_report, current_plan_json, override_choice, patch_target, sport_override)
             result.planning_result = planning
             result.success = True

@@ -3,6 +3,7 @@ import json
 import logging
 from contextlib import asynccontextmanager
 from datetime import date, datetime, timedelta, timezone
+from uuid import uuid4
 
 from fastapi import FastAPI, HTTPException, Query
 from fastapi.middleware.cors import CORSMiddleware
@@ -253,16 +254,16 @@ class LoginRequest(BaseModel):
 
 @app.post("/api/auth/login")
 def login(body: LoginRequest):
-    """Look up a user by email and return their user_id.
-    No password — this is a personal single-user app.
-    """
     email = body.email.strip().lower()
     with get_session() as session:
         user = session.execute(
             select(User).where(User.email == email)
         ).scalar_one_or_none()
         if user is None:
-            raise HTTPException(status_code=404, detail="No account found for that email.")
+            user = User(email=email)
+            session.add(user)
+            session.flush()
+            session.add(UserProfile(user_id=user.id))
         user_id = user.id
         user_email = user.email
     return {"user_id": user_id, "email": user_email}
@@ -581,7 +582,8 @@ async def patch_today_session(body: PatchTodayRequest):
 
     for attempt in range(1, 4):
         response = await client.complete(
-            messages=messages, system=pkg.system_prompt, json_mode=True
+            messages=messages, system=pkg.system_prompt, json_mode=True,
+            user_id=body.user_id, session_id=str(uuid4()),
         )
         try:
             raw = _json.loads(response.content)
